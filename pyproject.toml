@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openbrightness-due"
+version = "0.1.0"
+description = "OpenBrightness Display Understanding Engine (DUE) — read-only terminal display perception engine"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+authors = [{ name = "OpenBrightness" }]
+dependencies = [
+    "numpy>=1.26.0",
+    "textual>=0.80.0",
+    "pywayland>=0.4.19",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+due = "openbrightness.due.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["openbrightness"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["openbrightness/due/_proto"]
+
+[tool.ruff.lint]
+# EXE002: the project filesystem (FUSE mount) reports 0777 on every file and
+# ignores chmod, so the executable-bit rule cannot be satisfied here.
+ignore = ["EXE002", "S110"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["openbrightness"]
+exclude = "openbrightness/due/_proto/"
+
+[[tool.mypy.overrides]]
+module = ["gi", "gi.*", "pywayland", "pywayland.*"]
+ignore_missing_imports = true
