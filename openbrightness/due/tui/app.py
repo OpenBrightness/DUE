@@ -1,4 +1,4 @@
-"""DueApp — the Textual application shell (PLAN_V1.md sections 5–6)."""
+"""DueApp — the Textual application shell (PLAN.md sections 5–6)."""
 
 from __future__ import annotations
 

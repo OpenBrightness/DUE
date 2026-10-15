@@ -1,4 +1,4 @@
-"""Vectorized BT.709 luminance analysis (PLAN_V1.md section 3)."""
+"""Vectorized BT.709 luminance analysis (PLAN.md section 3)."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ class LuminanceAnalyzer:
     """Computes :class:`LuminanceMetrics` for a :class:`DisplayFrame`.
 
     Analysis runs on a 4x strided subsample which gives a ~22x speedup over
-    full resolution at < 0.08% mean-luminance error (PLAN_V1.md section 3).
+    full resolution at < 0.08% mean-luminance error (PLAN.md section 3).
     """
 
     def __init__(self, subsample_step: int = _SUBSAMPLE_STEP) -> None:

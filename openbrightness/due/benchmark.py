@@ -1,4 +1,4 @@
-"""1,000-frame pipeline benchmark (PLAN_V1.md sections 8-9).
+"""1,000-frame pipeline benchmark (PLAN.md sections 8-9).
 
 Measures the two pipeline stages on target-panel geometry synthetic frames:
 - extract: capture-side BGRx→RGB copy + subsample gather (as in capture/wlr.py)
@@ -24,7 +24,7 @@ from openbrightness.due.capture.wlr import bgrx_to_rgb
 from openbrightness.due.models import DisplayFrame
 from openbrightness.due.temporal.tracker import TemporalTracker
 
-_TARGET_EXTRACT_MS = 5.0  # full-frame BGRx→RGB owned copy (PLAN_V1.md §9)
+_TARGET_EXTRACT_MS = 5.0  # full-frame BGRx→RGB owned copy (PLAN.md §9)
 _TARGET_ANALYSIS_MS = 2.0
 _TARGET_TOTAL_MS = 25.0
 

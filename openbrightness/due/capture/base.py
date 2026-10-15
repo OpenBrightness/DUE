@@ -1,4 +1,4 @@
-"""Capture backend abstraction (PLAN_V1.md section 2)."""
+"""Capture backend abstraction (PLAN.md section 2)."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class DisplayCaptureBackend(ABC):
 
     Contract: ``on_frame`` is invoked on the backend's own thread (GLib loop
     or timer). Callbacks must be fast and must not block; the coordinator
-    hands frames off via a drop-oldest queue (PLAN_V1.md section 5).
+    hands frames off via a drop-oldest queue (PLAN.md section 5).
     """
 
     def __init__(self, output: OutputInfo) -> None:

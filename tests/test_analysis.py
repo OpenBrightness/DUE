@@ -1,4 +1,4 @@
-"""Synthetic-matrix tests for the LuminanceAnalyzer (PLAN_V1.md M1)."""
+"""Synthetic-matrix tests for the LuminanceAnalyzer (PLAN.md M1)."""
 
 from __future__ import annotations
 

@@ -1,535 +1,459 @@
-# OpenBrightness DUE V1 — Implementation Plan (`PLAN.md`)
+# OpenBrightness — Project Plan (`PLAN.md`)
 
-**Project:** OpenBrightness — Display Understanding Engine (DUE)  
-**Document Type:** Technical Implementation Plan  
-**Target Platform:** Fedora Linux 44 (x86_64), Niri Wayland Compositor (26.04), Linux Kernel 7.1.x  
-**Target Hardware:** Laptop internal display (`eDP-1` via AMDGPU) & external HDMI/DP monitors (Visual Capture & Analysis only)  
-**Runtime:** Python 3.12+ (PyGObject, NumPy, Textual)  
-**Status:** Approved for Implementation Planning  
+**Project:** OpenBrightness — Display Understanding Engine (DUE)
+**Document Type:** Single authoritative project plan (V1 as-built + V2 design + V3 outlook)
+**Target Platform:** Fedora Linux 44 (x86_64), Niri Wayland Compositor (26.04), Linux Kernel 7.1.x
+**Target Hardware:** Laptop internal display (`eDP-1` via AMDGPU) & external HDMI/DP monitors
+**Status:** **V1 complete & verified (2026-10-15)** — V2 (adaptive adjustment) designed below
 **References:**
-- Vision & Scope: [`IDEA.md`](file:///home/shanwis/Data/PROJECTS/DUE/IDEA.md)
-- Capture Research: [`docs/research/wayland_pipewire_capture_report.md`](file:///home/shanwis/Data/PROJECTS/DUE/docs/research/wayland_pipewire_capture_report.md)
-- Display Control Research: [`docs/research/linux_display_control_report.md`](file:///home/shanwis/Data/PROJECTS/DUE/docs/research/linux_display_control_report.md)
+- Vision & scope: [`IDEA.md`](IDEA.md)
+- Capture research: [`docs/research/wayland_pipewire_capture_report.md`](docs/research/wayland_pipewire_capture_report.md)
+- Display-control research: [`docs/research/linux_display_control_report.md`](docs/research/linux_display_control_report.md)
 
 ---
 
-## 1. Executive Summary & Requirements Reconciliation
+## 0. Document History & Empirical Corrections
 
-OpenBrightness DUE (Display Understanding Engine) V1 is an open-source, local, terminal-based perception engine. It captures rendered video frames from a user-selected display on Wayland at a fixed sampling interval (~1 FPS), computes deterministic visual statistics (luminance distribution, contrast, dark/bright ratios, temporal change), and renders a real-time updating dashboard in the terminal.
+This file consolidates the former `PLAN.md` (original V1 draft) and `PLAN_V1.md`
+(reconciled implementation plan) into one project-wide plan, and records the
+corrections made when the design met reality.
 
-### 1.1 Requirements Reconciliation Matrix
+| # | Correction | Resolution |
+|---|---|---|
+| 1 | Monitor selection (`--display`, TUI picker) unsatisfiable via the XDG portal (it shows its own dialog and accepts no connector argument) | **Capture built on `WlrScreencopyBackend`** (`zwlr_screencopy_manager_v1` + `wl_shm`) — native per-connector selection, no dialog (see §0.A) |
+| 2 | Latency contradiction ("<5 ms" vs "<25 ms") | Single target: **total pipeline < 25 ms** end-to-end at 1 FPS |
+| 3 | `discovery` module mandated but missing from file tree/milestones | `openbrightness/due/discovery.py` delivered (M2) |
+| 4 | "Zero-copy" subsample views unsafe after buffer unmap; ndarray construction ignoring rowstride | `DisplayFrame` stores a full-res **owned** RGB copy; `get_subsampled()` returns a contiguous copy (deliberate) |
+| 5 | `median_luminance` and `p50_luminance` duplicated | Single `median_luminance` (= P50) |
+| 6 | "Permanent exclusion" of external control contradicted the vision doc | Restated as a **safety policy**: external monitors are never *auto*-adjusted (EEPROM wear); user-initiated manual adjustment is permitted with mandatory rate limiting (§11.2) |
+| 7 | GLib main-loop ownership undefined | Capture backend owns one Wayland dispatch thread (§5) |
+| 8 | Error banner promised but undesigned | `StatusBanner` widget delivered (M3) |
+| 9 | No `tests/` layout | Full test tree delivered (§2.2) |
+| 10 | mypy pin drift | `mypy>=1.10.0` everywhere |
+| 11 | "Zero disk I/O" vs config persistence | Precise claim: **zero image/framebuffer I/O** |
+| 12 | SIGTERM handling promised, ownerless | `__main__.py` owns SIGINT/SIGTERM (§5) |
+| 13 | "Reset history" semantics undefined | `TemporalTracker.reset()` defined (§4) |
+| 14 | Cursor exclusion unspecified | `capture_output(overlay_cursor=0)` — cursor never in frames |
+| 15 | RMS contrast units drift | Canonical **0–127.5** (σ of Y on 0–255); TUI shows normalized 0–1 |
+| 16 | Benchmark geometry mismatched target panel | Benchmarks reference the panel's 1920×1200 (subsample 480×300) |
 
-| Requirement | Category | Technical Status in V1 | Architectural Boundary |
-| :--- | :--- | :--- | :--- |
-| **Python-based Core** | Mandatory | **Selected:** Python 3.12+ with strict typing | Core application runtime |
-| **Linux-First / Wayland** | Mandatory | **Verified:** Fedora 44 with Niri 26.04 | Target deployment environment |
-| **Monitor Selection** | Mandatory | **Selected:** Interactive TUI picker + CLI flag | `openbrightness.due.discovery` |
-| **Modular Frame Capture** | Mandatory | **Selected:** `DisplayCaptureBackend` ABC | `openbrightness.due.capture` |
-| **~1 FPS Fixed Sampling** | Mandatory | **Selected:** GStreamer `videorate` / timer | Capture & coordination loop |
-| **Deterministic Visual Stats** | Mandatory | **Selected:** Vectorized NumPy (BT.709 $Y$) | `openbrightness.due.analysis` |
-| **Temporal Frame Comparison**| Mandatory | **Selected:** Sliding frame delta ($\Delta_{\text{temp}}$) | `openbrightness.due.temporal` |
-| **In-Place Updating TUI** | Mandatory | **Selected:** Textual terminal dashboard | `openbrightness.due.tui` |
-| **Zero Screenshot Dumps** | Mandatory | **Selected:** Ephemeral RAM buffers only | Zero disk I/O guarantee |
-| **Zero Log Spam** | Mandatory | **Selected:** Textual full-screen app | No stdout/stderr streaming |
-| **Read-Only / No Hardware Writes**| Mandatory | **Strict:** Zero DDC/CI or backlight writes | V1 is strictly a read-only analysis tool |
-| **Decoupled Architecture** | Mandatory | **Selected:** Clean domain models | Extensible for future V2 internal control |
-| **Automated Test Suite** | Mandatory | **Selected:** pytest + synthetic frames | Unit & integration test suites |
+### 0.A Capture Pivot (Empirical Finding, 2026-10-14)
 
-### 1.2 Explicit Non-Goals for V1
-- **V1 is Strictly a Read-Only Analysis Tool:** V1 computes and displays visual telemetry; it does not contain any actuation, recommendation, or control logic.
-- **Zero Hardware Control in V1:** No writing to `/sys/class/backlight` or DDC/CI over `/dev/i2c-N`.
-- **Permanent Exclusion of External Monitor Control:** Writing to external monitor settings via DDC/CI is permanently excluded from the project roadmap due to non-volatile EEPROM wear and hardware bricking hazards.
-- **No Machine Learning:** No semantic object detection, OCR, or neural networks.
-- **No Ambient Light Sensors (ALS):** No integration with room lux sensors (`iio-sensor-proxy`).
-- **No Graphical GUI:** No GTK/Qt desktop application window.
-- **No Background Daemon / REST API:** Terminal application only.
+The original design used GStreamer (`pipewiresrc`) over PipeWire. Live
+verification on the target machine (GStreamer 1.28.6 / pipewire-gstreamer 1.6.8)
+proved that path **unusable for CPU frame analysis**:
 
----
+- The Mutter/niri ScreenCast D-Bus flow works, but the PipeWire node it creates
+  exposes only `BGRx` with a DRM modifier list; `pipewiresrc` fails to fixate
+  caps (`gst_caps_is_fixed` assertion) and delivers **1-byte placeholder
+  buffers** — reproduced across every caps-filter workaround.
+- `zwlr_screencopy_manager_v1` works perfectly: the compositor copies frames
+  into client `wl_shm` memory — plain CPU RAM, exactly what the capture research
+  recommends ("prefer linear SHM"). Verified live: 1920×1200 frames with correct
+  stride and pixel values.
 
-## 2. Capture Architecture & Technical Selection
-
-### 2.1 Evaluation of Evaluated Candidates on Fedora 44 / Niri
-
-Based on empirical testing documented in [`docs/research/wayland_pipewire_capture_report.md`](file:///home/shanwis/Data/PROJECTS/DUE/docs/research/wayland_pipewire_capture_report.md):
-
-```mermaid
-flowchart TD
-    subgraph Evaluated Capture Approaches
-        C1["1. ext-image-copy-capture-v1\n(Staging Protocol)"]
-        C2["2. zwlr_screencopy_v1\n(wlroots Unstable)"]
-        C3["3. XDG Desktop Portal + PipeWire\n(Freedesktop Standard)"]
-        C4["4. Mutter ScreenCast D-Bus\n(Niri Internal Bridge)"]
-    end
-
-    C1 -->|Status| S1["NOT in Niri 26.04 Registry\n(Issue #1558 in progress)"]
-    C2 -->|Status| S2["Supported in Niri (v3, id 32)\nFails on GNOME/KDE; pywayland low-level"]
-    C3 -->|Status| S3["FULLY SUPPORTED & VERIFIED\nUniversal standard; PyGObject GStreamer"]
-    C4 -->|Status| S4["Supported in Niri (v4, id :1.18)\nHeadless Niri fallback"]
-
-    S3 ==>|RECOMMENDED PRIMARY| PRIMARY["PortalGstBackend"]
-    S4 -.->|RECOMMENDED FALLBACK| FALLBACK["MutterGstBackend"]
-```
-
-### 2.2 Primary Selection: `PortalGstBackend`
-- **Mechanism:** `org.freedesktop.portal.ScreenCast` D-Bus handshake $\rightarrow$ PipeWire remote FD & node ID $\rightarrow$ GStreamer `pipewiresrc` pipeline $\rightarrow$ `appsink` sample pull.
-- **Justification:**
-  1. **Universal Portability:** Works across Niri, GNOME, KDE, wlroots (Sway/Wayfire), and COSMIC without compositor-specific code.
-  2. **Production-Grade Python Stack:** `python3-gobject` and `pipewire-gstreamer` are pre-installed Fedora core packages. No custom C extensions or unmaintained PyPI wheels required.
-  3. **Zero-Copy Memory Mapping:** GStreamer `appsink` maps linear buffers directly into a NumPy view via `Gst.Buffer.map(Gst.MapFlags.READ)`.
-  4. **Headless Persistence:** Portal v4/v5 supports `restore_token`, allowing the user to select the display once and subsequently run headlessly without prompts.
-
-### 2.3 Secondary Fallback: `MutterGstBackend` (Direct Niri D-Bus)
-- **Mechanism:** Direct call to Niri's `org.gnome.Mutter.ScreenCast.CreateSession()` and `RecordMonitor(connector_name)`.
-- **Use Case:** Headless automated test scripts or CLI runs on Niri where no GUI portal dialog is acceptable even on initial run.
-
-### 2.4 Test Double: `MockCaptureBackend`
-- **Mechanism:** Generates procedural, synthetic in-memory RGB frames (gradients, checkerboards, solid black/white/gray, animated luminance sweeps).
-- **Use Case:** Enables early TUI development, headless CI test execution, and deterministic validation of image analysis formulas without requiring a running Wayland session or PipeWire daemon.
+Consequence: **`WlrScreencopyBackend` is the only live capture backend**, with
+vendored pywayland bindings (`_proto/`, source XML in `protocols/`). Cost:
+zwlr_screencopy covers niri/sway/wlroots-family compositors but **not GNOME/KDE**
+— portal-based portability is deferred until the pipewiresrc DMA-BUF bug is fixed
+upstream.
 
 ---
 
-## 3. Component Architecture & Data Flow
+## 1. Product Definition & Version Roadmap
 
-```mermaid
-flowchart LR
-    subgraph Capture Layer
-        COMP[Wayland Compositor\nNiri] -->|PipeWire Node| PW[PipeWire Daemon]
-        PW -->|pipewiresrc| GST[GStreamer Pipeline\nvideoconvert ! videorate]
-        GST -->|appsink pull_sample| CAP[PortalGstBackend]
-        MOCK[MockCaptureBackend]
-    end
+DUE is a local, terminal-based display perception engine. It reads what the user
+is actually looking at (~1 FPS), turns it into deterministic visual statistics,
+and — from V2 on — uses those statistics to gently improve display comfort
+(eye-strain reduction) with strict hardware-safety guarantees.
 
-    subgraph Coordination Layer
-        CAP -->|DisplayFrame| Q[(Bounded Queue\nmaxsize=1)]
-        MOCK -->|DisplayFrame| Q
-        Q -->|Drop Oldest| WORKER[Engine Worker Thread]
-    end
+**The arc:** V1 measures and explains. V2 acts on those measurements, safely and
+with the user in control.
 
-    subgraph Analysis Layer
-        WORKER -->|4x Subsample View| ANA[LuminanceAnalyzer\nNumPy BT.709]
-        ANA -->|Luminance Frame| TEMP[TemporalTracker\nSliding Delta]
-        ANA --> STATS[LuminanceMetrics Model]
-        TEMP --> STATS
-    end
+### 1.1 V1 — Read-Only Perception Engine *(complete, verified)*
 
-    subgraph Presentation Layer
-        STATS -->|Textual Message| TUI[Textual App\nDueApp]
-        TUI --> TUI_SCR[In-Place Terminal Dashboard]
-    end
+A strictly read-only TUI application that surfaces the key metrics needed to
+decide *what* display values should change and *why*:
+
+| Metric | What it tells us (and why it matters for comfort) |
+|---|---|
+| Mean / median / P10 / P90 luminance | How bright the content actually is on screen — the primary signal for target backlight level |
+| Dark-pixel ratio (Y < 51) | Dark-IDE / night-time dominance → brightness should likely come down |
+| Bright-pixel ratio (Y > 204) | Harsh full-white content → glare reduction candidates |
+| RMS contrast (σ of Y) | Overall visual harshness of the scene |
+| Temporal delta | Motion on screen — freeze adjustments during video/playback to avoid distraction |
+| 64-bin luminance histogram | Distribution shape (skew, bimodality) for policy tuning |
+| Capture/analysis latency | Engineering telemetry |
+
+V1 contains **zero actuation logic**: no DDC/CI writes, no backlight writes.
+
+### 1.2 V2 — Adaptive Adjustment Engine *(designed in §11)*
+
+Consumes V1 metrics and adjusts display values to improve the user experience
+(brightness/comfort targets derived from measured content). Hard rules:
+
+- **The entire feature is user-toggleable** — auto-adjustment is opt-in
+  (default **OFF**), one key press to enable/disable, state persisted.
+- **Auto-adjustment targets the laptop internal panel only** (`eDP-*`) —
+  volatile GPU/PWM backlight registers, safe for unlimited writes.
+- **External monitors are excluded from auto-adjustment** — DDC/CI writes hit
+  internal EEPROM rated for 10,000–100,000 write cycles; automated writes would
+  destroy the monitor's scaler memory. Externals may only ever be adjusted by
+  explicit, user-initiated manual action, with mandatory write rate limiting
+  (§11.2).
+
+### 1.3 V3 — Future (out of scope for now)
+
+Content-aware understanding (ML/OCR), ambient light sensors, and further
+automation. Any automation for external monitors in any version must remain
+**off**; the EEPROM hazard does not expire.
+
+### 1.4 V1 Requirements (delivered)
+
+| # | Requirement | Owner |
+|---|---|---|
+| R1 | Python 3.12+, strict typing (`mypy --strict`-clean) | all |
+| R2 | Linux / Wayland (Fedora + Niri reference target) | — |
+| R3 | Monitor selection: interactive TUI picker + `--display <connector>` | `discovery` |
+| R4 | Modular capture behind `DisplayCaptureBackend` ABC | `capture` |
+| R5 | Fixed ~1 FPS sampling | `capture` |
+| R6 | Deterministic vectorized BT.709 statistics | `analysis` |
+| R7 | Temporal delta tracking with reset | `temporal` |
+| R8 | In-place Textual TUI (no scrollback pollution) | `tui` |
+| R9 | **Zero image/framebuffer disk I/O** | all |
+| R10 | Zero log spam (quiet default, `-v` for debug) | all |
+| R11 | Strictly read-only (V1): no display hardware writes | all |
+| R12 | Decoupled pipeline (capture ↛ analysis ↛ UI) | `coordinator` |
+| R13 | pytest suite with synthetic-frame fixtures | `tests` |
+
+### 1.5 Non-Goals
+
+- ML/OCR content classification, ambient light sensors, GUI, daemon/REST API (V3+).
+- Sandboxed (Flatpak) distribution.
+- **Any form of automated adjustment of external monitors — permanently excluded (§11.2).**
+
+---
+
+## 2. Architecture (V1, as built)
+
+### 2.1 Capture
+
+```
+                ┌──────────────────────────────┐
+ --display / TUI ►      Backend selector       │
+                └──────────────┬───────────────┘
+                               ▼
+                ┌──────────────────────────────┐
+                │ WlrScreencopyBackend         │  only live backend
+                │ zwlr_screencopy_manager_v1   │
+                │ capture_output(cursor=0)     │
+                │ per-output selection native  │
+                └──────────────┬───────────────┘
+                               │ compositor copies into wl_shm (CPU memory)
+                               ▼
+                bgrx_to_rgb(): stride-aware copy → owned RGB ndarray
+                               │
+                               ▼
+                coordinator.Queue(maxsize=1)  (drop-oldest)
+                               │
+                               ▼
+                worker thread: shared luma → temporal + metrics
+                               │
+                               ▼
+                Textual UI (post_message)
 ```
 
-### 3.1 Logical Module Boundaries
+- **wlr path:** `zwlr_screencopy_manager_v1` v3 — one compositor copy per tick
+  into our `wl_shm` pool, copied to an owned RGB array, pool recycled. Native
+  connector selection, no permission dialog, cursor excluded. Verified live.
+- **Mock path:** `MockCaptureBackend` generates deterministic synthetic content
+  for TUI development, CI, and `--backend mock`.
+- **GStreamer paths:** dropped after live verification (§0.A).
+
+### 2.2 File Layout
 
 ```
-openbrightness/
-└── due/
+openbrightness/due/
+├── __init__.py
+├── __main__.py             # CLI entry (`due`): argparse, signals, teardown
+├── models.py               # Frozen dataclasses (OutputInfo, DisplayFrame, LuminanceMetrics)
+├── discovery.py            # Output enumeration → list[OutputInfo]
+├── coordinator.py          # Thread-safe pipeline orchestrator (1-slot queue, worker)
+├── _proto/                 # Vendored pywayland bindings (generated, do not edit)
+│   ├── wayland.py
+│   └── wlr_screencopy_unstable_v1.py
+├── capture/
+│   ├── __init__.py
+│   ├── base.py             # DisplayCaptureBackend ABC + CaptureError hierarchy
+│   ├── wlr.py              # zwlr_screencopy + wl_shm (live)
+│   └── mock.py             # Synthetic frames
+├── analysis/
+│   ├── __init__.py
+│   └── luminance.py        # LuminanceAnalyzer
+├── temporal/
+│   ├── __init__.py
+│   └── tracker.py          # TemporalTracker
+├── benchmark.py            # 1,000-frame harness
+└── tui/
     ├── __init__.py
-    ├── __main__.py               # CLI entrypoint (`due` command)
-    ├── models.py                 # Core immutable dataclasses
-    ├── capture/
+    ├── app.py              # DueApp
+    ├── screens/
     │   ├── __init__.py
-    │   ├── base.py               # DisplayCaptureBackend (ABC)
-    │   ├── portal.py             # PortalGstBackend (Primary)
-    │   ├── mutter.py             # MutterGstBackend (Direct Niri Fallback)
-    │   └── mock.py               # MockCaptureBackend (Testing/Dev)
-    ├── analysis/
-    │   ├── __init__.py
-    │   └── luminance.py          # Vectorized LuminanceAnalyzer
-    ├── temporal/
-    │   ├── __init__.py
-    │   └── tracker.py            # TemporalTracker (Frame deltas)
-    ├── coordinator.py            # Thread-safe pipeline orchestrator
-    └── tui/
+    │   ├── select.py       # DisplaySelectScreen
+    │   └── dashboard.py    # DashboardScreen
+    └── widgets/
         ├── __init__.py
-        ├── app.py                # Textual DueApp
-        ├── screens/
-        │   ├── select.py         # Display selection screen
-        │   └── dashboard.py      # Main monitoring dashboard
-        └── widgets/
-            ├── metric_card.py    # Metric visualizer
-            ├── histogram.py      # Unicode 64-bin distribution bar
-            └── status_bar.py     # Latency & FPS telemetry
+        ├── metric_card.py      # LuminanceCard, DistributionCard
+        ├── histogram.py        # 64-bin Unicode bar histogram
+        └── status_bar.py       # TelemetryFooter + StatusBanner
+
+protocols/
+└── wlr-screencopy-unstable-v1.xml   # source XML for the vendored bindings
+
+tests/
+├── conftest.py             # synthetic-frame fixtures
+├── test_models.py
+├── test_analysis.py
+├── test_temporal.py
+├── test_discovery.py
+├── test_mock_backend.py
+├── test_wlr_backend.py     # stride/copy logic + backend contract
+├── test_coordinator.py
+├── test_cli.py             # CLI flags & backend selection
+├── test_tui.py
+├── test_error_handling.py  # §6 failure matrix
+├── test_perf.py            # benchmark smoke (CI-safe thresholds)
+└── test_live_capture.py    # integration; auto-skips without a session
 ```
 
-### 3.2 Data Contracts & Value Objects
+### 2.3 Data Contracts
 
-```python
-# openbrightness/due/models.py
-from dataclasses import dataclass
-from typing import Optional, Tuple
-import numpy as np
+All dataclasses `frozen=True, slots=True`.
 
-@dataclass(frozen=True)
-class OutputInfo:
-    """Represents a discovered display output."""
-    name: str                     # e.g., 'eDP-1', 'HDMI-A-1'
-    make: str                     # e.g., 'LG Display'
-    model: str                    # e.g., 'Unknown 0x06F9'
-    width: int                    # e.g., 1920
-    height: int                   # e.g., 1200
-    refresh_rate: float           # e.g., 60.001
-    is_primary: bool
-
-@dataclass(frozen=True)
-class DisplayFrame:
-    """Represents an ingested video frame."""
-    data: np.ndarray              # Shape (H, W, 3), dtype uint8 (RGB)
-    width: int
-    height: int
-    stride: int
-    format: str                   # 'RGB'
-    timestamp_pts: float          # Stream presentation timestamp (sec)
-    capture_monotonic: float      # Host monotonic timestamp (sec)
-
-    def get_subsampled(self, step: int = 4) -> np.ndarray:
-        """Returns zero-copy strided view downsampled by step."""
-        return self.data[::step, ::step, :]
-
-@dataclass(frozen=True)
-class LuminanceMetrics:
-    """Calculated statistical metrics for a single frame."""
-    frame_index: int
-    mean_luminance: float         # 0.0 to 255.0
-    median_luminance: float       # 0.0 to 255.0
-    p10_luminance: float          # 10th percentile (0.0 to 255.0)
-    p50_luminance: float          # 50th percentile (0.0 to 255.0)
-    p90_luminance: float          # 90th percentile (0.0 to 255.0)
-    dark_pixel_ratio: float       # Fraction of pixels with Y < 51 (0.0 to 1.0)
-    bright_pixel_ratio: float     # Fraction of pixels with Y > 204 (0.0 to 1.0)
-    rms_contrast: float           # Standard deviation of luminance (0.0 to 127.5)
-    temporal_delta: float         # Mean absolute pixel difference from prev frame (0.0 to 1.0)
-    histogram: np.ndarray         # Shape (64,), dtype float32 (normalized frequencies)
-    capture_latency_ms: float     # Compositor-to-buffer latency
-    analysis_latency_ms: float    # NumPy computation latency
-```
+**`OutputInfo`** — `connector`, `make`, `model`, `width`, `height`, `refresh_rate`, `is_primary`.
+**`DisplayFrame`** — `data: NDArray[uint8] (H,W,3)` RGB, C-contiguous and owned; `width`, `height`, `pts_ns | None`, `captured_monotonic_ns`. `get_subsampled(step=4)` returns a contiguous copy.
+**`LuminanceMetrics`** — `mean_luminance`, `median_luminance` (= P50), `p10_luminance`, `p90_luminance`, `dark_ratio` (Y<51), `bright_ratio` (Y>204), `rms_contrast` (0–127.5; TUI shows /127.5), `temporal_delta | None` (0–1), `histogram` (64-bin normalized), `capture_latency_ms`, `analysis_latency_ms`, `width`, `height`, `timestamp_monotonic_ns`.
 
 ---
 
-## 4. Image Analysis & Statistical Metrics Specification
+## 3. Analysis Specification
 
-### 4.1 Subsampling Strategy & Justification
-- **The Trade-Off:** A full 1080p frame contains 2,073,600 pixels. Computing ITU-R BT.709 luminance and a 64-bin histogram across all 2.07M pixels takes **20.78 ms** per frame on an AMD Ryzen 5 5625U.
-- **The Optimization:** Taking a **4× strided subsample** (`frame[::4, ::4, :]`) produces a $480 \times 270$ array (129,600 pixels) with **zero memory copies** (NumPy strided slice).
-- **Verified Benchmark:** Subsampled analysis executes in **0.94 ms** (a **22.2× speedup**), reducing CPU utilization to $<0.1\%$ of a core.
-- **Statistical Invariance:** Across diverse desktop workloads, the mean luminance error between full-resolution and 4× subsampled frames is **$<0.08\%$**.
-- **Decision:** DUE V1 will compute statistical metrics on the 4× subsampled slice by default, while preserving the original resolution metadata.
+- **Subsampling:** 4× strided subsample (`[::4, ::4]`) computed as one gather+luma pass; 22.2× speedup vs full-res, < 0.08% mean-luminance error. 1920×1200 → 480×300.
+- **Luma:** `Y = 0.2126R + 0.7152G + 0.0722B` (float32; verified against integer approximation, max error < 0.4/255).
+- **Percentiles:** P10/P50/P90 via a single `np.partition` pass (linear interpolation, `np.percentile`-equivalent).
+- **Thresholds:** dark at Y < 51 (20%), bright at Y > 204 (80%).
+- **Histogram:** 64 bins over 0–255 via `np.bincount`, normalized to sum 1.
+- **Latency:** `T_capture` = PTS→callback (monotonic fallback); `T_analysis` = `perf_counter_ns()` around analysis.
+- **Shared luma:** the coordinator computes subsampled luma once per frame and passes it to both the temporal tracker and the analyzer (no duplicate work).
 
----
+## 4. Temporal Specification
 
-### 4.2 Detailed Metrics Formulations
+- **Delta:** `temporal_delta = mean(|Y_t − Y_{t−1}|)/255` on subsampled luma; `None` after start/reset/resolution change.
+- **Shape change:** tracker silently rebases (stores current as previous) — resolution changes never crash or produce garbage deltas.
+- **`reset()`** (`R` key / reconnect): drops previous frame and accumulated history (min/max/mean delta, frame count). Next frame reports `temporal_delta=None`.
 
-```mermaid
-flowchart LR
-    A["Raw RGB Frame (H, W, 3)"] --> B["4x Strided View (H/4, W/4, 3)\nZero-Copy Slice"]
-    B --> C["Vectorized BT.709 Transform\nY = 0.2126R + 0.7152G + 0.0722B"]
-    C --> D[Y 2D Array]
-    D --> E["np.mean(Y) -> Mean Luminance"]
-    D --> F["np.percentile(Y, [10, 50, 90]) -> P10, P50, P90"]
-    D --> G["np.count_nonzero(Y < 51) / N -> Dark Ratio"]
-    D --> H["np.count_nonzero(Y > 204) / N -> Bright Ratio"]
-    D --> I["np.std(Y) -> RMS Contrast"]
-    D --> J["np.histogram(Y, bins=64, range=(0, 256))"]
-    D --> K["mean(|Y_t - Y_t-1|) -> Temporal Delta"]
-```
+## 5. Threading & Concurrency Model
 
-#### 1. Mean Relative Luminance ($\bar{Y}$)
-- **Formula:** $\bar{Y} = \frac{1}{N} \sum_{i=1}^N Y_i$, where $Y = 0.2126R + 0.7152G + 0.0722B$.
-- **Range:** $0.0$ to $255.0$ (or normalized $0.0$ to $1.0$).
-- **Color Space:** Assumes standard SDR sRGB / Rec.709 primaries.
-- **Edge Cases:** All-black frame ($\bar{Y} = 0.0$), all-white frame ($\bar{Y} = 255.0$).
+| Thread | Owner | Work |
+|---|---|---|
+| Main | Textual | Async UI loop; `post_message` consumer |
+| Capture | `capture/wlr.py` | Owns the Wayland connection/dispatch loop; one compositor copy per tick → owned `DisplayFrame` → coordinator |
+| Worker | `coordinator.py` | Shared luma → temporal + metrics → callback → `post_message` |
+| Mock timer | `capture/mock.py` | 1 Hz ticker for synthetic frames |
 
-#### 2. Median Luminance ($P_{50}$) & Percentiles ($P_{10}, P_{90}$)
-- **Formula:** Computed via `np.percentile(Y, [10, 50, 90])`.
-- **Range:** $0.0$ to $255.0$.
-- **Purpose:** Robust representation of dynamic range and skewness, immune to narrow highlight or shadow outliers.
+- **Queue discipline:** `queue.Queue(maxsize=1)`, drop-oldest; a stalled UI never starves capture.
+- **Pause (`Space`/`P`):** coordinator stops consuming; capture drops; resume continues temporal tracking.
+- **Shutdown (owned by `__main__.py`):** signal/`Q` → `coordinator.stop()` → `backend.stop()` (Wayland thread + shm pools released) → Textual exit → terminal restored. SIGINT and SIGTERM both take this path.
 
-#### 3. Dark-Pixel Ratio ($R_{\text{dark}}$) & Bright-Pixel Ratio ($R_{\text{bright}}$)
-- **Formula:**
-  $$R_{\text{dark}} = \frac{1}{N} \sum_{i=1}^N \mathbb{I}(Y_i < T_{\text{dark}}), \quad T_{\text{dark}} = 51.0 \text{ (20\% luminance)}$$
-  $$R_{\text{bright}} = \frac{1}{N} \sum_{i=1}^N \mathbb{I}(Y_i > T_{\text{bright}}), \quad T_{\text{bright}} = 204.0 \text{ (80\% luminance)}$$
-- **Range:** $0.0$ to $1.0$ ($0\%$ to $100\%$).
-- **Purpose:** Classifies dominance of dark IDEs/terminals vs. bright documents/browser pages.
+## 6. Error Handling
 
-#### 4. RMS Contrast ($C_{\text{RMS}}$)
-- **Formula:** Root-Mean-Square Contrast defined as the standard deviation of luminance:
-  $$C_{\text{RMS}} = \sqrt{\frac{1}{N} \sum_{i=1}^N (Y_i - \bar{Y})^2} = \sigma_Y$$
-- **Range:** $0.0$ (flat uniform field) to $127.5$ (pure 50/50 black-and-white checkerboard).
-- **Purpose:** Standard psychophysical metric for overall image contrast, unaffected by spatial frequency.
+| Failure | Behavior |
+|---|---|
+| Compositor lacks `zwlr_screencopy_manager_v1` (e.g. GNOME/KDE) | Friendly fatal naming the unsupported compositor |
+| `--display` connector not found | `CaptureError` listing available outputs; app stays on picker |
+| Capture `failed` / session lock | Retry with backoff; 5 consecutive failures → `DisplayDisconnectedError` → banner "Display disconnected — reconnecting…", temporal reset on success |
+| Output unplug | Same recovery; `[S]` re-offers remaining outputs |
+| Resolution change | New shm size negotiated automatically; temporal auto-resets (§4) |
+| Wayland connect/protocol error | `CaptureError` → banner + friendly fatal |
+| SIGTERM/SIGINT | Clean teardown (§5) |
 
-#### 5. Temporal Frame Difference ($\Delta_{\text{temp}}$)
-- **Formula:** Mean Absolute Difference between consecutive normalized luminance frames:
-  $$\Delta_{\text{temp}} = \frac{1}{255 \cdot N} \sum_{i=1}^N |Y_{i, t} - Y_{i, t-1}|$$
-- **Range:** $0.0$ (identical static image) to $1.0$ (instant flip from pure black to pure white).
-- **Purpose:** Detects active video playback, scrolling, or window switching vs. static reading.
+Logging: `logging` to stderr, `WARNING` default, `-v` → `DEBUG`. Nothing else writes to stdout/stderr during normal operation.
 
-#### 6. Latency Metrics ($T_{\text{capture}}$ & $T_{\text{analysis}}$)
-- **$T_{\text{capture}}$:** Elapsed time between presentation timestamp (`PTS`) and buffer dequeuing in `appsink` (measures compositor and PipeWire scheduling delay).
-- **$T_{\text{analysis}}$:** Measured elapsed time via `time.perf_counter_ns()` during NumPy operations.
+## 7. Technology Stack & Packaging
 
----
+- Runtime: `numpy>=1.26.0`, `textual>=0.80.0`, `pywayland>=0.4.19`.
+- Dev: `pytest>=8.0.0`, `ruff>=0.6.0`, `mypy>=1.10.0`.
+- **Protocol bindings:** `openbrightness/due/_proto/` holds pywayland-generated
+  bindings (vendored — no scanner step at install). Regenerate with
+  `pywayland-scanner -i /usr/share/wayland/wayland.xml protocols/wlr-screencopy-unstable-v1.xml -o openbrightness/due/_proto`.
+- `pyproject.toml`: hatchling, PEP 621, `openbrightness-due` v0.1.0, MIT, console script `due`.
 
-## 5. TUI Design Plan (Textual)
+## 8. Milestones
 
-### 5.1 Architecture & Reactive State
-The TUI is implemented using **Textual**, a modern asynchronous widget-based terminal framework. It runs on Textual's async event loop, while heavy GStreamer/PipeWire buffer ingestion runs on a dedicated background worker thread.
+### 8.1 V1 (all complete, verified 2026-10-15)
 
-```mermaid
-flowchart TD
-    subgraph Engine Worker Thread
-        PULL[appsink pull_sample] --> MAP[Map buffer to NumPy]
-        MAP --> CALC[Compute LuminanceMetrics]
-        CALC --> POST[Post Message to Textual Event Loop]
-    end
+| # | Objective | Status |
+|---|---|---|
+| M0 | Scaffold, packaging, venv | ✅ |
+| M1 | Models + analysis + temporal, synthetic-matrix tests | ✅ |
+| M2 | Discovery, mock capture, coordinator | ✅ |
+| M3 | Textual TUI on mock data | ✅ |
+| M4 | Live capture (`capture/wlr.py`, vendored bindings) — verified live on Niri | ✅ |
+| M5 | Integration: CLI `--display`/`--backend`, picker, `[S]` | ✅ |
+| M6 | Error-handling matrix, signals, banner | ✅ |
+| M7 | 1,000-frame benchmark harness | ✅ |
+| M8 | README, full suite green | ✅ |
 
-    subgraph Textual Async Main Loop
-        POST --> EVT[on_metrics_updated]
-        EVT --> U1[Update MetricCard Widgets]
-        EVT --> U2[Re-draw HistogramWidget]
-        EVT --> U3[Update StatusBar Latency]
-    end
-```
+### 8.2 V2 (adaptive adjustment — see §11)
 
-### 5.2 Application Screen Flow
-1. **Screen 1: `DisplaySelectScreen`:**
-   - Queried outputs (`eDP-1`, `HDMI-A-1`) displayed in a clean `ListView`.
-   - Displays resolution, make, model, and active refresh rate.
-   - User selects with `[Up]`, `[Down]`, and `[Enter]`. (If CLI specifies `--display <name>`, this screen is bypassed).
-2. **Screen 2: `DashboardScreen`:**
-   - Full-screen dashboard updated in-place via reactive properties.
-   - Header with active display, physical resolution, and live sampling FPS.
-   - Grid layout containing:
-     - `LuminanceCard`: Mean, Median, P10, P90.
-     - `DistributionCard`: Dark-pixel %, Bright-pixel %, RMS Contrast, Temporal Delta.
-     - `HistogramWidget`: 64-bin ASCII/Unicode vertical bar chart.
-     - `TelemetryFooter`: $T_{\text{capture}}$, $T_{\text{analysis}}$, $T_{\text{total}}$ latency.
-3. **Keyboard Controls:**
-   - `[Space]` or `[P]`: Pause / Resume continuous capture.
-   - `[S]`: Switch active display (returns to display selection screen).
-   - `[R]`: Reset temporal statistics and history.
-   - `[Q]` or `[Ctrl+C]`: Clean shutdown and exit.
+| # | Objective | Deliverables | Verification |
+|---|---|---|---|
+| V2-M1 | Control abstraction | `control/base.py` (`DisplayControlBackend` ABC), `control/logind.py` (eDP backlight via `org.freedesktop.login1` `SetBrightness`) | Unit tests with fake D-Bus; brightness read-back matches |
+| V2-M2 | Policy engine | `control/policy.py`: metrics → target brightness with deadband, smoothing, motion freeze | Synthetic-metric tests: dark dominance lowers target; temporal delta high → no writes |
+| V2-M3 | Toggle & persistence | `[A]` master toggle (auto-adjust on/off, default OFF), config file (`~/.config/openbrightness/due.toml`), TUI status | Toggle flips instantly; state survives restart; OFF means zero writes |
+| V2-M4 | Manual adjustment | Rate-limited manual brightness control in TUI (laptop always; external only via explicit user action under §11.2 limits) | Write-rate tests with fake clock: never exceeds limits |
+| V2-M5 | Safety soak & docs | Write-count accounting, README + this plan updated | 1-hour soak: external EEPROM writes = 0 when auto on |
 
----
+## 9. Performance Targets (single source of truth)
 
-## 6. Dependencies & Packaging Plan
+| Stage | Target | Measured (Ryzen 5 5625U, 1920×1200) |
+|---|---|---|
+| T_extract (shm → owned RGB + subsample luma) | < 5 ms | ~4 ms |
+| T_analysis (temporal + metrics, shared luma) | < 2 ms | ~1.4 ms |
+| **T_total** | **< 25 ms** | **~5.5 ms** |
+| CPU | < 1.0% of one core at 1 FPS | ~0.5% |
+| RSS | < 80 MB, zero growth over 1 h soak | stable |
 
-### 6.1 Dependency Strategy
-To keep V1 lightweight and avoid compilation friction:
-- **Core Runtime Dependencies:**
-  - `numpy >= 1.26.0` (Vectorized image math)
-  - `textual >= 0.80.0` (Reactive terminal UI)
-  - `PyGObject >= 3.48.0` (GStreamer & D-Bus bindings)
-- **Development & Testing Dependencies:**
-  - `pytest >= 8.0.0`
-  - `pytest-asyncio >= 0.23.0`
-  - `ruff >= 0.6.0`
-  - `mypy >= 1.10.0`
+Benchmark: `python -m openbrightness.due.benchmark` (exits non-zero above targets).
 
-### 6.2 System Dependency Bridge
-`PyGObject` requires underlying GObject Introspection C libraries (`glib2`, `gstreamer1`, `pipewire-gstreamer`). On Fedora 44, these are pre-installed system packages.
-- **Virtual Environment Workflow:**  
-  The virtual environment must be created with system site package inheritance:
-  ```bash
-  python3 -m venv --system-site-packages .venv
-  source .venv/bin/activate
-  pip install --upgrade pip
-  pip install -e ".[dev]"
-  ```
+## 10. Acceptance Criteria
 
-### 6.3 Packaging Structure (`pyproject.toml`)
-Standard PEP 517/621 packaging using `hatchling`:
-```toml
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+### 10.1 V1 *(all verified 2026-10-15)*
 
-[project]
-name = "openbrightness-due"
-version = "0.1.0"
-description = "Display Understanding Engine for OpenBrightness"
-readme = "README.md"
-requires-python = ">=3.12"
-license = { text = "MIT" }
-authors = [{ name = "OpenBrightness Team" }]
-dependencies = [
-    "numpy>=1.26.0",
-    "textual>=0.80.0",
-    "PyGObject>=3.48.0",
-]
+1. ✅ `due` runs on Fedora/Niri without crashes or elevated privileges.
+2. ✅ Discovers all active outputs; picker and `--display` both work.
+3. ✅ Live ~1 FPS capture via `WlrScreencopyBackend` on Niri.
+4. ✅ Metrics match synthetic ground truth (uniform frames ≤ 0.5/255 error; ratios exact on bimodal fixtures; contrast exact on gray ramps).
+5. ✅ In-place dashboard: metric cards, 64-bin histogram, telemetry footer, error banner.
+6. ✅ `[Space]/[P]` pause, `[S]` switch display, `[R]` reset temporal, `[Q]` quit.
+7. ✅ Zero image/framebuffer files written to disk.
+8. ✅ Test suite green (88 tests); CI-safe without a live session.
+9. ✅ Latency < 25 ms total, CPU < 1.0% on target hardware.
+10. ✅ Clean shutdown on SIGINT/SIGTERM/`[Q]`; terminal restored, resources released.
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "ruff>=0.6.0",
-    "mypy>=0.9.0",
-]
+### 10.2 V2
 
-[project.scripts]
-due = "openbrightness.due.__main__:main"
-```
+1. Auto-adjustment defaults **OFF**; `[A]` toggles it; state persisted across restarts.
+2. With auto ON, **only** the laptop internal panel (`eDP-*`) is ever written; external monitors receive **zero** automatic writes (verified by write-count accounting in a 1-hour soak).
+3. Brightness targets derive from V1 metrics (mean/median luminance primary; dark/bright ratios modulate) and are visible in the TUI ("target vs applied").
+4. Motion freeze: no adjustments while `temporal_delta` exceeds a threshold (video protection).
+5. Manual adjustment honors rate limits even under key-mashing: ≤ 1 write / 10–15 s per display, deadband ≥ 5%.
+6. Toggle OFF → zero writes, period. V1 metrics continue to display.
+7. All policy math unit-tested with synthetic metrics and a fake clock.
 
 ---
 
-## 7. Ordered Implementation Milestones
+## 11. V2 Design — Adaptive Adjustment (safety-first)
 
-```mermaid
-flowchart TD
-    M0["Milestone 0: Project Setup & Virtualenv Bridge\nSetup pyproject.toml, verify PyGObject + GStreamer in venv"]
-    M1["Milestone 1: Domain Models & Image Analysis Engine\nImplement LuminanceAnalyzer & 100% synthetic unit tests"]
-    M2["Milestone 2: Mock Capture Backend & Pipeline Decoupling\nImplement MockCaptureBackend, bounded queue & worker thread"]
-    M3["Milestone 3: Textual TUI Dashboard\nBuild complete UI against Mock backend (headless testable)"]
-    M4["Milestone 4: GStreamer PipeWire Live Backend\nImplement PortalGstBackend, D-Bus session & Gst appsink"]
-    M5["Milestone 5: Integration & Display Switching\nConnect live capture to TUI; implement output selection"]
-    M6["Milestone 6: Error Handling & Hotplug Resilience\nHandle disconnects, mode changes, and portal denials"]
-    M7["Milestone 7: Performance Benchmarking & Validation\nMeasure CPU load, memory stability, latency targets"]
-    M8["Milestone 8: Documentation & V1 Verification\nUser documentation, CLI flags, final sign-off"]
+### 11.1 Concept
 
-    M0 --> M1 --> M2 --> M3 --> M4 --> M5 --> M6 --> M7 --> M8
-```
+V1 answers "what is the user actually looking at?"; V2 answers "what should the
+display be doing about it?". The policy engine translates measured content into a
+target backlight level (and later, color temperature), applies it through a
+control backend, and shows the user exactly what it did and why. Everything is
+opt-in and reversible.
 
-### Milestone Details:
-
-#### Milestone 0: Project Setup & System Site-Packages Bridge
-- **Objective:** Establish the Python packaging foundation and verify GStreamer/PyGObject importability in `.venv`.
-- **Deliverables:** `pyproject.toml`, directory structure, `.venv` setup script.
-- **Verification:** `python3 -c "import gi; gi.require_version('Gst', '1.0'); from gi.repository import Gst; Gst.init(None); print('Gst OK')"` exits 0.
-
-#### Milestone 1: Domain Models & Image Analysis Engine
-- **Objective:** Build pure, deterministic image processing functions and models.
-- **Deliverables:** `models.py`, `analysis/luminance.py`, `temporal/tracker.py`.
-- **Verification:** Unit tests with synthetic test matrices (black, white, gray, gradient, checkerboard) validating mean, percentiles, contrast, and histogram.
-
-#### Milestone 2: Mock Capture Backend & Pipeline Decoupling
-- **Objective:** Establish the `DisplayCaptureBackend` interface and synthetic frame generator.
-- **Deliverables:** `capture/base.py`, `capture/mock.py`, `coordinator.py` with bounded 1-slot queue.
-- **Verification:** Mock backend streams synthetic frames to coordinator without memory growth.
-
-#### Milestone 3: Textual TUI Dashboard
-- **Objective:** Build the complete interactive TUI driven by mock data.
-- **Deliverables:** `tui/app.py`, `screens/dashboard.py`, `widgets/histogram.py`.
-- **Verification:** Textual headless tests (`app.run_test()`) verify dashboard updates, histogram rendering, pause/resume, and clean exit.
-
-#### Milestone 4: GStreamer PipeWire Live Capture Backend
-- **Objective:** Implement the real Wayland capture backend.
-- **Deliverables:** `capture/portal.py` (D-Bus `org.freedesktop.portal.ScreenCast` + GStreamer `pipewiresrc`).
-- **Verification:** Captures real frames from Niri, maps memory to NumPy, and verifies resolution and stride.
-
-#### Milestone 5: Full Integration & Display Switching
-- **Objective:** Connect live capture to the analysis engine and TUI.
-- **Deliverables:** `screens/select.py`, dynamic backend switching, CLI `--display` argument.
-- **Verification:** User launches `due`, selects display, and views live updating metrics.
-
-#### Milestone 6: Error Handling & Hotplug Resilience
-- **Objective:** Harden the application against runtime display events.
-- **Deliverables:** Stream reconnect logic, GStreamer bus message handlers (`GST_MESSAGE_EOS`, `GST_MESSAGE_ERROR`).
-- **Verification:** Simulated monitor disconnect or lock screen does not crash DUE; TUI displays friendly error banner.
-
-#### Milestone 7: Performance Benchmarking & Profiling
-- **Objective:** Validate latency and resource utilization on the host hardware.
-- **Deliverables:** Automated benchmark test measuring $T_{\text{capture}}$, $T_{\text{analysis}}$, memory footprint over 1,000 frames.
-- **Verification:** Meets all performance targets ($<5\text{ ms}$ total latency, $<1\%$ CPU load).
-
-#### Milestone 8: Documentation & V1 Verification
-- **Objective:** Finalize user documentation and installation instructions.
-- **Deliverables:** `README.md`, verified test suite pass, tag `v0.1.0`.
-
----
-
-## 8. Verification & Performance Strategy
-
-### 8.1 Test Suites Matrix
-
-| Test Suite | Scope | Execution Target | Automation |
-| :--- | :--- | :--- | :--- |
-| **`test_analysis.py`** | BT.709 math, percentiles, RMS contrast, histogram bins | Synthetic NumPy arrays | Headless pytest |
-| **`test_temporal.py`** | Frame-to-frame delta, ring buffer smoothing | Synthetic frame pairs | Headless pytest |
-| **`test_mock_backend.py`**| Interface compliance, rate-limiting, queue decoupling | Mock backend | Headless pytest |
-| **`test_tui.py`** | Dashboard layout, keyboard shortcuts, pause/resume | Textual pilot test | Headless pytest |
-| **`test_live_portal.py`** | D-Bus session creation, PipeWire ingestion | Live Fedora/Niri session | Manual / Integration |
-| **`test_perf.py`** | 1,000-frame latency breakdown and RSS memory stability | Benchmark harness | Automated benchmark |
-
-### 8.2 Performance Targets on Target Hardware (Ryzen 5 5625U)
-- **Capture Latency ($T_{\text{capture}}$):** Target $< 15.0\text{ ms}$ (compositor render to dequeued buffer).
-- **Extraction Latency ($T_{\text{extract}}$):** Target $< 0.5\text{ ms}$ (buffer map & strided slice).
-- **Analysis Latency ($T_{\text{analysis}}$):** Target $< 2.0\text{ ms}$ (vectorized NumPy on 4× subsampled frame).
-- **UI Render Latency ($T_{\text{ui}}$):** Target $< 5.0\text{ ms}$ (Textual reactive DOM update).
-- **Total Pipeline Latency:** Target $< 25.0\text{ ms}$ end-to-end.
-- **CPU Utilization:** Target $< 1.0\%$ of a single CPU core at 1 FPS.
-- **Memory Footprint (RSS):** Target $< 80\text{ MB}$, zero growth over 1 hour of continuous execution.
-
----
-
-## 9. Future Display Control (V2 Roadmap Bridge)
-
-In accordance with [`docs/research/linux_display_control_report.md`](file:///home/shanwis/Data/PROJECTS/DUE/docs/research/linux_display_control_report.md), **DUE V1 is strictly a read-only visual perception tool**. It does not modify any display settings.
-
-### 9.1 The External Monitor Hazard: Why External Control is Removed
-The technical investigation into external monitor control via DDC/CI (VESA MCCS over I²C) revealed a fatal hardware constraint:
-1. **Destructive EEPROM Write Wear:** External desktop monitors write DDC/CI brightness and contrast values directly to internal non-volatile EEPROM or NOR Flash memory. EEPROMs are rated for only **10,000 to 100,000 lifetime write cycles**. An automated adaptive engine adjusting brightness at 1 FPS ($3,600\text{ writes/hour}$) would **permanently destroy/brick external monitor hardware within 1 to 3 days**.
-2. **Severe I²C Latency & Bus Instability:** DDC/CI commands require 40–100 ms inter-message delays and take 50–150 ms of blocking bus time per call. Furthermore, DisplayPort AUX tunneling and USB-C docks frequently drop DDC packets or crash monitor scalar microcode.
+### 11.2 Hardware Safety Policy *(from `linux_display_control_report.md`)*
 
 > [!CAUTION]
-> **Architectural Decision:** **External monitor control (DDC/CI writes) is permanently removed from the OpenBrightness project roadmap.**  
-> - **In V1:** External monitors are supported for **visual capture and analysis only** (via Wayland/PipeWire), which reads the compositor's GPU framebuffer and is 100% safe.
-> - **In V2 and Beyond:** Display control will be scoped **strictly and exclusively to laptop internal displays (`eDP-1`)**.
+> **External monitors are excluded from auto-adjustment — permanently, in every version.**
+>
+> DDC/CI brightness/contrast writes on external monitors go to internal EEPROM /
+> NOR flash rated for **10,000–100,000 write cycles**. An adaptive loop writing at
+> even 1 write/minute would exhaust a monitor's EEPROM in weeks-to-months and can
+> brick scaler microcode. DisplayPort AUX/USB-C docks additionally drop packets
+> and stall scalers. This is a hardware limit, not a software one.
 
----
+Concretely:
 
-### 9.2 V2 Scope: Laptop Internal Displays Only
-Laptop internal displays use GPU PWM or eDP DPCD backlight registers (`amdgpu_bl1`, `intel_backlight`). These are **volatile memory registers** that can be written billions of times with zero hardware degradation, $<1\text{ ms}$ latency, and zero root permissions via `systemd-logind`:
+| Display class | Control channel | Auto-adjust | Manual adjust |
+|---|---|---|---|
+| Laptop internal (`eDP-*`) | `org.freedesktop.login1.Session.SetBrightness` (volatile GPU PWM/DPCD registers) | ✅ allowed (user-toggled) | ✅ allowed |
+| External (HDMI/DP/…) | DDC/CI (VESA MCCS over I²C → EEPROM) | ❌ **never** | ✅ allowed, strictly rate-limited |
 
-```mermaid
-flowchart LR
-    DUE[DUE V1 Engine\nRead-Only Perception] -->|Emits LuminanceMetrics| BUS[Internal Event Emitter]
-    
-    subgraph V2 Control Layer [Laptop Internal Displays Only]
-        BUS --> POLICY[Policy Engine\nTarget Brightness Calculation]
-        POLICY --> BACKLIGHT[SysfsBacklightBackend\nsystemd-logind SetBrightness]
-        BACKLIGHT --> PANEL[Laptop Internal Panel eDP-1\nVolatile GPU PWM Registers]
-    end
+Mandatory rate limiting for any DDC/CI write path (auto or manual):
+- **Deadband:** no write unless |target − applied| ≥ 5%.
+- **Rate cap:** ≤ 1 write per 10–15 s per display.
+- **Smoothing:** exponential smoothing of targets so inputs never translate 1:1 into writes.
+- **Accounting:** every write is logged/countered in-process for test assertions.
+
+### 11.3 Toggle
+
+- `[A]` (and `--auto` flag / config key) toggles auto-adjustment globally.
+- Default **OFF** — V1 behavior until the user opts in.
+- OFF means the policy engine computes nothing and the control backends issue zero writes; metrics keep streaming.
+- TUI shows the auto state and the current "target vs applied" brightness in the status area.
+
+### 11.4 Policy Sketch (deterministic, no ML in V2)
+
+```
+target_brightness =
+    base
+    + w1 * f(mean_luminance)        # bright content → slightly lower backlight
+    + w2 * f(dark_ratio)            # dark-UI dominance → lower backlight
+    + w3 * f(bright_ratio)          # harsh white → lower backlight
+    with motion guard: if temporal_delta > τ: hold
+    → EMA smoothing → deadband gate → rate-limited write (laptop only)
 ```
 
-- **Separation Invariant:** DUE V1 generates data; it never acts upon it.
-- **V2 Preparation:** `LuminanceMetrics` includes all signals necessary for future adaptive algorithms: global mean luminance, dark/bright ratios for glare compensation, and temporal delta to pause adjustments during rapid video motion.
+Weights and curves are constants, tunable from config; all policy behavior is
+unit-tested against synthetic metric streams (V1's `MockCaptureBackend` frames
+make end-to-end testing possible without touching hardware).
+
+### 11.5 Control Backends (V2)
+
+- **`LogindBacklightBackend`** — the auto path's only backend. `SetBrightness`
+  via `org.freedesktop.login1` (session-scoped, no root, < 1 ms). Volatile
+  registers: billions of writes are safe — but rate limiting still applies to
+  avoid visible flicker/annoyance.
+- **`DdcCiBackend`** — manual-only (V2-M4), obeys §11.2 limits unconditionally.
+  If safe write budgets cannot be verified for a display, manual DDC/CI degrades
+  to "unsupported" rather than guessing.
+
+### 11.6 Invariants (non-negotiable)
+
+1. No code path may auto-adjust an external monitor — enforced by the policy
+   layer, not by UI convention.
+2. Auto-adjustment is opt-in; absence of config == OFF.
+3. Every write goes through the rate limiter; no bypass "just this once".
+4. V1 stays usable and correct with all control code disabled (separation
+   invariant: perception never depends on actuation).
 
 ---
 
-## 10. Risk Register & Open Decisions
+## 12. V3 Outlook (not scheduled)
 
-| Risk Description | Severity | Likelihood | Mitigation Strategy | Verification Method |
-| :--- | :--- | :--- | :--- | :--- |
-| **1. Portal Dialog Prompting on Every Run** | Medium | Medium | Use Desktop Portal v4/v5 `restore_token` stored in user config to bypass interactive prompt. | Test token reuse across session restarts. |
-| **2. Buffer Pool Starvation** | High | Low | Enforce strict `maxsize=1` bounded queue; unmap and recycle GStreamer buffer in $<0.5\text{ ms}$. | Run 1-hour stress test logging dropped frames. |
-| **3. Non-sRGB / HDR Frame Ingestion** | Medium | Low | Force GStreamer pipeline to negotiate `video/x-raw,format=RGB` via `videoconvert`. | Inspect GStreamer caps on HDR outputs. |
-| **4. Wayland Output Scale Ambiguity** | Low | Medium | Read physical pixel resolution directly from GStreamer sample caps (`GstStructure`). | Verify on 1.25× fractional scaling in Niri. |
-| **5. Threading Contention with Textual UI** | Medium | Low | Engine worker thread communicates with Textual exclusively via thread-safe message posting (`post_message`). | Textual async test pilot verification. |
-| **6. External Monitor EEPROM Destruction** | Critical | High | **Architectural Decision:** External monitor control (DDC/CI writes) is permanently excluded from the project roadmap. V2 display control is strictly locked to laptop internal panels (eDP PWM). | Formally codified in PLAN.md. |
+- Content understanding (OCR/ML) for finer comfort rules; ambient light sensors
+  (`iio-sensor-proxy`) as a policy input.
+- Color-temperature / night-mode adaptation (compositor-side, safe).
+- **Not planned ever:** automated external-monitor adjustment (§11.2 stands).
 
-### Technical Decision Status:
-- [x] **V1 Operational Mode:** Strictly read-only perception tool; zero hardware writes (*Confirmed requirement*).
-- [x] **Primary Capture:** XDG Desktop Portal ScreenCast + PipeWire via GStreamer `appsink` (*Confirmed by research*).
-- [x] **Subsampling Rate:** 4× spatial subsampling ($480 \times 270$) (*Confirmed by empirical benchmark: 22.2× speedup*).
-- [x] **TUI Framework:** Textual (*Confirmed for rich terminal widgets and async loop*).
-- [x] **Display Control Scope (V2):** Permanently restricted to laptop internal displays (`eDP-1`) via `systemd-logind` D-Bus; external DDC/CI control removed due to EEPROM wear hazard (*Confirmed by research*).
-- [ ] **First Implementation Milestone:** Milestone 0 (Packaging & System Site-Packages Virtualenv).
+## 13. Risks
 
----
-
-## 11. Explicit V1 Acceptance Criteria
-
-The OpenBrightness DUE V1 release will be considered complete when all of the following criteria are met:
-
-1. [ ] **Execution:** `due` runs from the command line in Fedora/Niri without crashes or elevated privileges.
-2. [ ] **Discovery:** Discovers and displays all active Wayland display outputs (`eDP-1`, `HDMI-A-1`).
-3. [ ] **Live Capture:** Successfully captures frames from a selected monitor at ~1 FPS using the `PortalGstBackend`.
-4. [ ] **Visual Statistics:** Accurately computes mean, median, P10/P50/P90 percentiles, dark/bright ratios, RMS contrast, and temporal delta.
-5. [ ] **TUI Rendering:** Renders a clean Textual dashboard with metric cards, live 64-bin histogram, and telemetry footer that updates in-place without scrolling or terminal spam.
-6. [ ] **Interactive Controls:** `[P]` pauses/resumes capture, `[S]` switches displays, and `[Q]` exits cleanly.
-7. [ ] **Zero Storage Overhead:** No image files are saved to disk during continuous execution.
-8. [ ] **Automated Tests:** 100% of unit tests pass under `pytest`, including synthetic image tests and mock backend tests.
-9. [ ] **Performance Cap:** End-to-end processing latency is $<25\text{ ms}$ and CPU utilization is $<1.0\%$ on the target hardware.
-10. [ ] **Clean Shutdown:** Exits cleanly upon `SIGINT`/`SIGTERM` or `[Q]`, resetting terminal state and releasing PipeWire/GStreamer resources.
+| Risk | Mitigation |
+|---|---|
+| zwlr_screencopy unavailable (GNOME/KDE) | Clear fatal naming the protocol; portal capture tracked once pipewiresrc's DMA-BUF bug is fixed upstream |
+| Large-frame copy cost (1920×1200 BGRx→RGB) | Compositor does the slow part; our copy is one stride-aware vectorized op (~4 ms, inside the 25 ms budget) |
+| Session lock / compositor restart | Retries + backoff; banner; `[S]` re-offers outputs |
+| Fractional scaling | Capture is the physical framebuffer; metrics reflect physical pixels |
+| Textual threading bugs | All UI mutation via `post_message`; workers never touch widgets |
+| HDCP/protected content reads ~0 | Notice on sustained black frames |
+| **External EEPROM wear** | §11.2 policy: auto never touches externals; manual path rate-limited and accounted |
+| V2 policy annoyance (visible pumping) | Motion guard, EMA smoothing, deadband, default OFF |
 
 ---
 
-*End of Implementation Plan. Implementation should proceed starting with Milestone 0.*
+*V1 implementation history: milestones M0–M8 completed and verified 2026-10-14/15;
+88 tests green, `ruff`/`mypy --strict` clean, benchmark ~5.5 ms total vs 25 ms
+budget, live-verified on Fedora 44 / Niri 26.04. Implementation of V2 should
+start with V2-M1.*

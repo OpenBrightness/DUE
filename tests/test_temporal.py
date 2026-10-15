@@ -1,4 +1,4 @@
-"""Tests for the TemporalTracker (PLAN_V1.md section 4)."""
+"""Tests for the TemporalTracker (PLAN.md section 4)."""
 
 from __future__ import annotations
 

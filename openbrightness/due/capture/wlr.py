@@ -1,8 +1,8 @@
-"""Live capture via zwlr_screencopy_manager_v1 + wl_shm (PLAN_V1.md M4).
+"""Live capture via zwlr_screencopy_manager_v1 + wl_shm (PLAN.md M4).
 
 Primary live backend on wlroots-family compositors (niri verified). Frames are
 copied compositor-side into a shared-memory buffer we own, so pixel data is
-plain CPU memory: no DMA-BUF import, no mapping tricks (see PLAN_V1.md section
+plain CPU memory: no DMA-BUF import, no mapping tricks (see PLAN.md section
 2.1 for why the GStreamer/PipeWire path is not used on this stack).
 
 The compositor connection is owned by one thread; ``on_frame`` runs on that

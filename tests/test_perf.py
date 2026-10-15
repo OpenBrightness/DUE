@@ -1,8 +1,8 @@
-"""CI-safe performance smoke test (PLAN_V1.md M7).
+"""CI-safe performance smoke test (PLAN.md M7).
 
 Uses small frame counts and generous CI thresholds; the strict hardware
 targets are validated by `python -m openbrightness.due.benchmark` on the
-target machine (PLAN_V1.md section 9).
+target machine (PLAN.md section 9).
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Temporal frame-delta tracking (PLAN_V1.md section 4)."""
+"""Temporal frame-delta tracking (PLAN.md section 4)."""
 
 from __future__ import annotations
 

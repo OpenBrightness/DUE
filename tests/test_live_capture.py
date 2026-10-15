@@ -1,6 +1,6 @@
 """Live capture integration test — auto-skips without a Wayland session.
 
-Manual checklist (PLAN_V1.md M6):
+Manual checklist (PLAN.md M6):
 - capture frames at the expected physical resolution
 - y-inversion and stride handled correctly (visual sanity via mean values)
 - clean teardown with no leaked shm pools

@@ -1,4 +1,4 @@
-"""Error-handling tests for the M6 matrix (PLAN_V1.md section 6)."""
+"""Error-handling tests for the M6 matrix (PLAN.md section 6)."""
 
 from __future__ import annotations
 

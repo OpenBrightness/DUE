@@ -1,4 +1,4 @@
-"""Thread-safe pipeline orchestrator (PLAN_V1.md section 5).
+"""Thread-safe pipeline orchestrator (PLAN.md section 5).
 
 Capture callbacks (GLib loop / timer thread) hand frames to a 1-slot
 drop-oldest queue; a worker thread runs analysis + temporal tracking and

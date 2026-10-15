@@ -16,7 +16,7 @@ dashboard.
 
 - Linux with a Wayland compositor that supports `zwlr_screencopy_manager_v1`
   (niri and sway verified/expected; **GNOME/KDE are not supported in V1** — see
-  `PLAN_V1.md` §0.A for the capture-architecture rationale)
+  `PLAN.md` §0.A for the capture-architecture rationale)
 - Python 3.12+
 - `wayland` core protocol XML (`/usr/share/wayland/wayland.xml`, from `wayland` or
   `wayland-devel`) — needed only if you regenerate the vendored protocol bindings
@@ -47,7 +47,7 @@ copies the output into a shared-memory (`wl_shm`) buffer that DUE owns, and DUE
 converts the pixels into an owned RGB NumPy array. No GPU buffers, no DMA-BUF
 imports — plain CPU memory end to end. Protocol bindings are vendored under
 `openbrightness/due/_proto/` (regenerate with `pywayland-scanner`, see
-`PLAN_V1.md` §7).
+`PLAN.md` §7).
 
 ## Testing
 
@@ -122,7 +122,7 @@ python -m openbrightness.due.benchmark --frames 100 --width 2560 --height 1440
 ```
 
 Prints per-stage latency (extract / analysis / total) and RSS growth; exits
-non-zero if analysis ≥ 2 ms mean or total ≥ 25 ms mean (PLAN_V1.md §9).
+non-zero if analysis ≥ 2 ms mean or total ≥ 25 ms mean (PLAN.md §9).
 Reference numbers (Ryzen 5 5625U, 1920×1200): extract ~4 ms, analysis ~1.4 ms,
 total ~5.4 ms per frame at 1 FPS.
 
@@ -135,7 +135,9 @@ mypy openbrightness               # strict type-check
 
 ## Documentation
 
-- `PLAN_V1.md` — authoritative V1 implementation plan
+- `PLAN.md` — authoritative project plan: V1 as-built, V2 adaptive adjustment
+  design (toggleable; auto-adjust limited to the laptop panel — external monitors
+  are excluded from auto-adjustment to protect their EEPROM), V3 outlook
 - `IDEA.md` — product concept and roadmap
 - `docs/research/` — capture and display-control research reports
 

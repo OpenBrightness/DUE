@@ -1,4 +1,4 @@
-"""Active output enumeration (PLAN_V1.md section 2.2).
+"""Active output enumeration (PLAN.md section 2.2).
 
 Providers, in order:
 1. ``niri msg -j outputs`` — Niri IPC (reference target).

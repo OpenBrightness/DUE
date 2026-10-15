@@ -36,7 +36,7 @@ class DisplayFrame:
 
     ``data`` is C-contiguous ``(H, W, 3)`` uint8 RGB *owned by this frame*:
     capture backends must copy out of the capture buffer before releasing it
-    (see PLAN_V1.md section 5). Rowstride padding is normalized at copy time.
+    (see PLAN.md section 5). Rowstride padding is normalized at copy time.
     """
 
     data: NDArray[np.uint8]
