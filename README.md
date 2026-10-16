@@ -36,9 +36,32 @@ due                    # interactive display picker + dashboard
 due --display eDP-1    # capture a specific connector
 due --backend mock     # synthetic frames (no session needed)
 due --list-outputs     # enumerate active outputs
+due --auto             # start with content-adaptive dimming enabled
 ```
 
-Keys: `Space`/`P` pause · `S` switch display · `R` reset temporal stats · `Q` quit.
+Keys: `Space`/`P` pause · `A` auto-adjust on/off · `S` switch display ·
+`R` reset temporal stats · `Q` quit.
+
+## Auto-adjust (V2, experimental)
+
+Content-adaptive backlight dimming for the **laptop internal panel only**:
+when the screen is mostly dark, the backlight gently dims toward a floor
+(default: never below 60% of the brightness you set); bright content returns
+it to your baseline. It never raises brightness above what you set.
+
+- **Opt-in, default OFF.** `[A]` or `--auto` enables it; state persists in
+  `~/.config/openbrightness/due.toml`.
+- **External monitors are never auto-adjusted** — DDC/CI writes hit their
+  internal EEPROM (10k–100k write cycles); automated writes would destroy the
+  hardware. This is enforced in code, not by convention (PLAN.md §11.2).
+- **User intent wins:** if you change brightness manually (Fn keys/slider),
+  DUE stands down for 5 minutes and adopts your new setting as the baseline.
+- **Safe exit:** quitting keeps the current brightness — restoring the
+  baseline only happens when you toggle auto OFF with `[A]`. (Deliberate
+  deviation from the research report §10.2: quitting at night must not
+  blind you.)
+- Never blacks out the panel (hard 5% floor) and never writes while screen
+  content is in motion (video protection).
 
 ## How capture works
 

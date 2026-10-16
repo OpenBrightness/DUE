@@ -13,7 +13,9 @@ from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Footer, Header, Static
 
+from openbrightness.due.control.manager import ControlStatus
 from openbrightness.due.models import LuminanceMetrics
+from openbrightness.due.tui.widgets.control_status import ControlStatusStrip
 from openbrightness.due.tui.widgets.histogram import HistogramWidget
 from openbrightness.due.tui.widgets.metric_card import DistributionCard, LuminanceCard
 from openbrightness.due.tui.widgets.status_bar import StatusBanner, TelemetryFooter
@@ -28,6 +30,7 @@ class DashboardScreen(Screen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         ("space", "toggle_pause", "Pause/Resume"),
         ("p", "toggle_pause", "Pause/Resume"),
+        ("a", "toggle_auto", "Auto-adjust"),
         ("s", "switch_display", "Switch display"),
         ("r", "reset_temporal", "Reset temporal"),
         ("q", "quit_app", "Quit"),
@@ -87,6 +90,7 @@ class DashboardScreen(Screen[None]):
                     yield Static("[b]Luminance distribution[/b]", id="histogram-title")
                     yield HistogramWidget(id="histogram")
                 yield TrendWidget(id="trend")
+        yield ControlStatusStrip(id="control-status")
         yield StatusBanner(id="status-banner")
         yield TelemetryFooter(id="telemetry")
         yield Footer()
@@ -161,6 +165,11 @@ class DashboardScreen(Screen[None]):
         if isinstance(trend, TrendWidget):
             trend.clear()
 
+    def show_control_status(self, status: ControlStatus) -> None:
+        strip = self._find("#control-status")
+        if isinstance(strip, ControlStatusStrip):
+            strip.show_status(status)
+
     def set_paused(self, paused: bool) -> None:
         self._paused = paused
 
@@ -174,10 +183,16 @@ class DashboardScreen(Screen[None]):
         self.clear_trends()
         self.post_message(self.ResetTemporal())
 
+    def action_toggle_auto(self) -> None:
+        self.post_message(self.ToggleAuto())
+
     def action_quit_app(self) -> None:
         self.post_message(self.QuitApp())
 
     class TogglePause(Message):
+        pass
+
+    class ToggleAuto(Message):
         pass
 
     class SwitchDisplay(Message):

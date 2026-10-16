@@ -269,3 +269,96 @@ def test_switch_display_binding() -> None:
             assert isinstance(app.screen, DisplaySelectScreen)
 
     run(scenario())
+
+
+# ---- auto-adjust (V2) -------------------------------------------------------
+
+
+def _fake_control_factory(output: OutputInfo):
+    from tests.test_control_manager import FakeBackend
+
+    return FakeBackend(initial=0.9)
+
+
+def test_control_strip_renders_states() -> None:
+    from openbrightness.due.control.manager import ControlStatus
+    from openbrightness.due.tui.widgets.control_status import ControlStatusStrip
+
+    strip = ControlStatusStrip()
+    strip.show_status(ControlStatus(auto_enabled=False, supported=False))
+    assert "n/a" in str(strip.render())
+    strip.show_status(ControlStatus(auto_enabled=False, supported=True))
+    assert "OFF" in str(strip.render())
+    strip.show_status(
+        ControlStatus(
+            auto_enabled=True, supported=True, baseline=0.95, target=0.82, applied=0.85
+        )
+    )
+    text = str(strip.render())
+    assert "ON" in text and "95%" in text and "82%" in text
+    strip.show_status(
+        ControlStatus(
+            auto_enabled=True,
+            supported=True,
+            inhibited_until=1e12,
+        )
+    )
+    assert "INHIBITED" in str(strip.render())
+
+
+def test_toggle_auto_binding_enables_and_notices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import openbrightness.due.tui.app as app_mod
+
+    saved: list[object] = []
+    monkeypatch.setattr(app_mod, "save_config", lambda cfg: saved.append(cfg))
+
+    async def scenario() -> None:
+        app = DueApp(
+            OUTPUTS,
+            mock_factory,
+            initial_output=OUTPUTS[0],
+            control_factory=_fake_control_factory,
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            await pilot.press("a")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, DashboardScreen)
+            assert app._control is not None
+            assert app._control.status().auto_enabled is True
+            banner = str(screen.query_one("#status-banner").render())
+            assert "Auto-adjust ON" in banner
+            await pilot.press("a")
+            await pilot.pause()
+            assert app._control.status().auto_enabled is False
+            banner = str(screen.query_one("#status-banner").render())
+            assert "Auto-adjust OFF" in banner
+
+    run(scenario())
+    assert len(saved) == 2  # persisted on enable and on disable
+
+
+def test_auto_unavailable_on_external_display() -> None:
+    external = OutputInfo("HDMI-A-1", "BenQ", "GW2490", 1920, 1080, 60.0)
+
+    async def scenario() -> None:
+        app = DueApp(
+            [external],
+            mock_factory,
+            initial_output=external,
+            control_factory=_fake_control_factory,
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            await pilot.press("a")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, DashboardScreen)
+            assert app._control is None  # 11.6 invariant 5
+            banner = str(screen.query_one("#status-banner").render())
+            assert "unavailable" in banner
+
+    run(scenario())

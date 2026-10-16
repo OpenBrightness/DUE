@@ -190,6 +190,13 @@ openbrightness/due/
 ├── analysis/
 │   ├── __init__.py
 │   └── luminance.py        # LuminanceAnalyzer
+├── control/                # V2: display control (imports only models + stdlib)
+│   ├── __init__.py
+│   ├── base.py             # DisplayControlBackend ABC + ControlError + WriteLedger
+│   ├── logind.py           # internal-panel backlight via logind SetBrightness
+│   ├── policy.py           # AdaptiveBrightnessPolicy (pure, dim-only)
+│   ├── manager.py          # ControlManager: safety gate, inhibit, write worker
+│   └── config.py           # ~/.config/openbrightness/due.toml persistence
 ├── temporal/
 │   ├── __init__.py
 │   └── tracker.py          # TemporalTracker
@@ -206,6 +213,7 @@ openbrightness/due/
         ├── metric_card.py      # LuminanceCard, DistributionCard
         ├── histogram.py        # 64-bin Unicode multi-line spectrum
         ├── trend.py            # TrendWidget: 30-sample sparklines
+        ├── control_status.py   # auto-adjust status strip (V2)
         └── status_bar.py       # TelemetryFooter + StatusBanner
 
 protocols/
@@ -223,6 +231,11 @@ tests/
 ├── test_cli.py             # CLI flags & backend selection
 ├── test_tui.py
 ├── test_widgets.py         # widget pure-render tests (histogram/cards/trend)
+├── test_control_policy.py  # V2 policy engine
+├── test_control_manager.py # V2 safety gate, inhibit, ledger
+├── test_control_logind.py  # V2 backlight backend (fake sysfs + D-Bus)
+├── test_control_config.py  # V2 persistence
+├── test_control_safety.py  # V2 §11.6 invariants + 10k-frame soak
 ├── test_error_handling.py  # §6 failure matrix
 ├── test_perf.py            # benchmark smoke (CI-safe thresholds)
 └── test_live_capture.py    # integration; auto-skips without a session
@@ -308,13 +321,13 @@ Logging: `logging` to stderr, `WARNING` default, `-v` → `DEBUG`. Nothing else 
 
 ### 8.2 V2 (adaptive adjustment — see §11)
 
-| # | Objective | Deliverables | Verification |
-|---|---|---|---|
-| V2-M1 | Control abstraction | `control/base.py` (`DisplayControlBackend` ABC), `control/logind.py` (eDP backlight via `org.freedesktop.login1` `SetBrightness`) | Unit tests with fake D-Bus; brightness read-back matches |
-| V2-M2 | Policy engine | `control/policy.py`: metrics → target brightness with deadband, smoothing, motion freeze | Synthetic-metric tests: dark dominance lowers target; temporal delta high → no writes |
-| V2-M3 | Toggle & persistence | `[A]` master toggle (auto-adjust on/off, default OFF), config file (`~/.config/openbrightness/due.toml`), TUI status | Toggle flips instantly; state survives restart; OFF means zero writes |
-| V2-M4 | Manual adjustment | Rate-limited manual brightness control in TUI (laptop always; external only via explicit user action under §11.2 limits) | Write-rate tests with fake clock: never exceeds limits |
-| V2-M5 | Safety soak & docs | Write-count accounting, README + this plan updated | 1-hour soak: external EEPROM writes = 0 when auto on |
+| # | Objective | Deliverables | Verification | Status |
+|---|---|---|---|---|
+| V2-M1 | Control abstraction | `control/base.py` (`DisplayControlBackend` ABC), `control/logind.py` (eDP backlight via `org.freedesktop.login1` `SetBrightness`) | Unit tests with fake D-Bus; brightness read-back matches | ✅ done (2026-10-15) |
+| V2-M2 | Policy engine | `control/policy.py`: metrics → target brightness with deadband, smoothing, motion freeze | Synthetic-metric tests: dark dominance lowers target; temporal delta high → no writes | ✅ done |
+| V2-M3 | Toggle & persistence | `[A]` master toggle (auto-adjust on/off, default OFF), `--auto` flag, config file (`~/.config/openbrightness/due.toml`), TUI status strip | Toggle flips instantly; state survives restart; OFF means zero writes | ✅ done |
+| V2-M4 | Manual adjustment | Rate-limited manual brightness control in TUI (laptop always; external only via explicit user action under §11.2 limits) | Write-rate tests with fake clock: never exceeds limits | ⏳ next plan |
+| V2-M5 | Safety soak & docs | Write-count accounting (`WriteLedger`), README + this plan updated | Deterministic 10k-frame soak: external EEPROM writes = 0 when auto on | ✅ done (soak as deterministic test) |
 
 ## 9. Performance Targets (single source of truth)
 

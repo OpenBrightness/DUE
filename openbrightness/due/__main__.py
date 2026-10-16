@@ -11,6 +11,7 @@ from collections.abc import Callable
 from openbrightness.due.capture.base import CaptureError, DisplayCaptureBackend
 from openbrightness.due.capture.mock import MockCaptureBackend
 from openbrightness.due.capture.wlr import WlrScreencopyBackend
+from openbrightness.due.control.config import AutoAdjustConfig, load_config, save_config
 from openbrightness.due.discovery import DiscoveryError, find_output, list_outputs
 from openbrightness.due.models import OutputInfo
 
@@ -50,6 +51,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--list-outputs",
         action="store_true",
         help="enumerate active outputs and exit",
+    )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="enable content-adaptive backlight dimming (internal panels only)",
     )
     parser.add_argument(
         "-v",
@@ -96,10 +102,35 @@ def main(argv: list[str] | None = None) -> int:
 
     from openbrightness.due.tui.app import DueApp
 
+    auto_config = load_config()
+    if args.auto and not auto_config.auto_enabled:
+        auto_config = AutoAdjustConfig(
+            auto_enabled=True,
+            baseline=auto_config.baseline,
+            factor_min=auto_config.factor_min,
+            alpha=auto_config.alpha,
+            motion_freeze_threshold=auto_config.motion_freeze_threshold,
+        )
+        try:
+            save_config(auto_config)
+        except OSError as exc:
+            log.warning("could not persist auto-adjust state: %s", exc)
+    if args.backend == "mock" and auto_config.auto_enabled:
+        # synthetic frames must never drive real backlight writes on their own;
+        # [A] still allows explicit opt-in during mock sessions.
+        auto_config = AutoAdjustConfig(
+            auto_enabled=False,
+            baseline=auto_config.baseline,
+            factor_min=auto_config.factor_min,
+            alpha=auto_config.alpha,
+            motion_freeze_threshold=auto_config.motion_freeze_threshold,
+        )
+
     app = DueApp(
         outputs=outputs,
         backend_factory=build_backend_factory(args.backend),
         initial_output=initial,
+        auto_config=auto_config,
     )
 
     def _forward_signal(signum: int, _frame: object) -> None:
