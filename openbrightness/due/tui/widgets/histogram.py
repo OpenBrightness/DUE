@@ -12,21 +12,29 @@ from textual.widgets import Static
 from openbrightness.due.models import HISTOGRAM_BINS, LuminanceMetrics
 
 _BARS = " ▁▂▃▄▅▆▇█"
-_RENDER_ROWS = 6
+_RENDER_ROWS = 12
 _MIN_BINS = 16
 _GUTTER_WIDTH = 6
 
 
 def _group_bins(hist: NDArray[np.float32], width: int | None) -> NDArray[np.float32]:
-    """Sum adjacent bins so the chart fits `width` columns (floor of 16)."""
+    """Distribute the 64 bins into exactly `width` columns (floor of 16).
+
+    Largest-remainder distribution: every column is used at full resolution
+    instead of quantizing to 32/64 columns like naive ceil-grouping.
+    """
     n = int(hist.size)
     if width is None or width >= n:
         return hist[:n]
     width = max(width, _MIN_BINS)
-    group = -(-n // width)  # ceil division
-    usable = n - (n % group)
-    grouped: NDArray[np.float32] = hist[:usable].reshape(-1, group).sum(axis=1)
-    return grouped
+    base, extra = divmod(n, width)
+    counts = [base + (1 if i < extra else 0) for i in range(width)]
+    out = np.zeros(width, dtype=hist.dtype)
+    pos = 0
+    for i, count in enumerate(counts):
+        out[i] = hist[pos : pos + count].sum()
+        pos += count
+    return out
 
 
 def _render_multi_line_bars(
@@ -90,10 +98,9 @@ def _render_axis(width: int) -> list[str]:
         start = min(col, max(width - len(text), 0))
         start = max(start, next_free)
         end = min(start + len(text), width)
-        if end <= start:
-            continue
-        segment = text[: end - start]
-        label_cells[start:end] = list(segment)
+        if end - start < len(text):
+            continue  # drop truncated edge labels rather than mangle them
+        label_cells[start:end] = list(text)
         next_free = end + 1
     return ["".join(ruler), "".join(label_cells)]
 
@@ -122,9 +129,9 @@ def _render_percentile_markers(m: LuminanceMetrics, width: int) -> list[str]:
         start = min(col, max(width - len(text), 0))
         start = max(start, next_free)
         end = min(start + len(text), width)
-        if end <= start:
-            continue
-        label_cells[start:end] = list(text[: end - start])
+        if end - start < len(text):
+            continue  # drop truncated edge labels rather than mangle them
+        label_cells[start:end] = list(text)
         next_free = end + 1
     return ["".join(carets), "".join(label_cells)]
 

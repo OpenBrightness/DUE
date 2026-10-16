@@ -8,8 +8,8 @@ from openbrightness.due.models import LuminanceMetrics
 
 MOTION_STATIC_MAX = 0.005
 MOTION_LIGHT_MAX = 0.05
-_BAR_WIDTH = 10
-_COMPOSITION_WIDTH = 24
+_BAR_WIDTH = 16
+_COMPOSITION_WIDTH = 30
 
 
 def _render_bar(value: float, max_val: float = 255.0, width: int = _BAR_WIDTH) -> str:

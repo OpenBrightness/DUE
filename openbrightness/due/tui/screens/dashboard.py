@@ -21,7 +21,7 @@ from openbrightness.due.tui.widgets.metric_card import DistributionCard, Luminan
 from openbrightness.due.tui.widgets.status_bar import StatusBanner, TelemetryFooter
 from openbrightness.due.tui.widgets.trend import TrendWidget
 
-_NARROW_THRESHOLD = 105
+_NARROW_THRESHOLD = 123
 
 
 class DashboardScreen(Screen[None]):
@@ -53,24 +53,43 @@ class DashboardScreen(Screen[None]):
         width: auto;
         max-width: 124;
         height: auto;
-        layout: horizontal;
+        layout: vertical;
     }
     #dashboard-container.-narrow {
+        width: 100%;
+    }
+    #main-row {
+        layout: horizontal;
+        width: auto;
+        height: auto;
+    }
+    #dashboard-container.-narrow #main-row {
         layout: vertical;
+        width: 100%;
     }
     #cards {
         width: 44;
         height: auto;
         margin-right: 1;
     }
-    #visual-panel {
-        width: 76;
-        height: auto;
+    #dashboard-container.-narrow #cards {
+        width: 100%;
+        margin-right: 0;
+    }
+    #luminance-card {
+        margin-bottom: 1;
     }
     #histogram-panel {
+        width: 74;
         height: auto;
         padding: 1 1;
         border: round $panel;
+    }
+    #dashboard-container.-narrow #histogram-panel {
+        width: 100%;
+    }
+    #trend {
+        width: 100%;
     }
     """
 
@@ -82,14 +101,14 @@ class DashboardScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         with Horizontal(id="body"), Vertical(id="dashboard-container"):
-            with Vertical(id="cards"):
-                yield LuminanceCard(id="luminance-card")
-                yield DistributionCard(id="distribution-card")
-            with Vertical(id="visual-panel"):
+            with Horizontal(id="main-row"):
+                with Vertical(id="cards"):
+                    yield LuminanceCard(id="luminance-card")
+                    yield DistributionCard(id="distribution-card")
                 with Vertical(id="histogram-panel"):
                     yield Static("[b]Luminance distribution[/b]", id="histogram-title")
                     yield HistogramWidget(id="histogram")
-                yield TrendWidget(id="trend")
+            yield TrendWidget(id="trend")
         yield ControlStatusStrip(id="control-status")
         yield StatusBanner(id="status-banner")
         yield TelemetryFooter(id="telemetry")

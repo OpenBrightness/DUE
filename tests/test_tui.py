@@ -146,8 +146,31 @@ def test_dashboard_has_redesign_dom() -> None:
             screen = app.screen
             assert isinstance(screen, DashboardScreen)
             assert screen.query_one("#dashboard-container")
-            assert screen.query_one("#visual-panel")
+            assert screen.query_one("#main-row")
             assert screen.query_one("#trend")
+
+    run(scenario())
+
+
+def test_layout_equal_widths_and_full_trend() -> None:
+    """Histogram box matches the metric cards width; trends span both (plan)."""
+    async def scenario() -> None:
+        app = DueApp(OUTPUTS, mock_factory, initial_output=OUTPUTS[0])
+        async with app.run_test(size=(150, 46)) as pilot:
+            await pilot.pause(0.3)
+            screen = app.screen
+            assert isinstance(screen, DashboardScreen)
+            cards = screen.query_one("#cards")
+            hist = screen.query_one("#histogram-panel")
+            trend = screen.query_one("#trend")
+            # region.width is the visible outer box (size is content-box only)
+            assert cards.region.width == 44
+            assert hist.region.width == 74
+            # trend spans metrics + gap + histogram
+            assert trend.region.width == cards.region.width + 1 + hist.region.width
+            # histogram box considers the gap: full left column height
+            assert hist.region.height == cards.region.height
+            assert cards.region.height == 21  # 10 + 1-row gap + 10
 
     run(scenario())
 
@@ -187,9 +210,14 @@ def test_dashboard_top_aligned_when_content_overflows() -> None:
             await pilot.pause()
             body = screen.query_one("#body")
             container = screen.query_one("#dashboard-container")
-            assert container.has_class("-narrow")  # 80 < 105 → stacked
+            assert container.has_class("-narrow")  # 80 < 123 → stacked
             assert body.has_class("-top-aligned")  # overflow → scrollable top
             assert body.styles.overflow_y == "auto"
+            # stacked boxes must not collapse (width: 100% chain)
+            cards = screen.query_one("#cards")
+            hist = screen.query_one("#histogram-panel")
+            assert cards.region.width == 74  # 80 − body padding 4 − scrollbar 2
+            assert hist.region.width == 74
 
     run(scenario())
 
