@@ -11,8 +11,6 @@ from textual.widgets import Label, Sparkline, Static
 from openbrightness.due.models import LuminanceMetrics
 
 _WINDOW = 30
-_LUMA_SCALE = 255.0
-_DELTA_SCALE = 1.0
 
 
 class TrendWidget(Static):
@@ -47,9 +45,9 @@ class TrendWidget(Static):
 
     def compose(self) -> ComposeResult:
         yield Label("Luminance trend (last 30 samples)", id="luma-trend-label")
-        yield Sparkline(id="luma-sparkline", summary_function=lambda data: _LUMA_SCALE)
+        yield Sparkline(id="luma-sparkline")
         yield Label("Motion trend (last 30 samples)", id="delta-trend-label")
-        yield Sparkline(id="delta-sparkline", summary_function=lambda data: _DELTA_SCALE)
+        yield Sparkline(id="delta-sparkline")
 
     def show_metrics(self, m: LuminanceMetrics) -> None:
         self._luma.append(m.mean_luminance)
