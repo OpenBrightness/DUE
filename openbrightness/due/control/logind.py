@@ -124,9 +124,14 @@ class LogindBacklightBackend(DisplayControlBackend):
         return self._max_brightness
 
     def get_brightness(self) -> float | None:
-        current = self._read_int(self._device_dir / "actual_brightness")
+        # Prefer the *setpoint* file: it lives in the same domain as our writes
+        # and as user changes (Fn keys write the same node). Verified on
+        # amdgpu_bl1 that actual_brightness reports in a different scale
+        # (43528 setpoint vs 35185 actual), which would falsely trigger the
+        # override detector if compared against written values.
+        current = self._read_int(self._device_dir / "brightness")
         if current is None:
-            current = self._read_int(self._device_dir / "brightness")
+            current = self._read_int(self._device_dir / "actual_brightness")
         if current is None:
             return None
         return max(0.0, min(1.0, current / self._max_brightness))

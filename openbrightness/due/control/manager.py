@@ -176,6 +176,12 @@ class ControlManager:
 
     def on_metrics(self, metrics: LuminanceMetrics) -> None:
         """Feed one metric sample (called from the coordinator worker)."""
+        try:
+            self._process_metrics(metrics)
+        finally:
+            self._emit_status()  # every tick: target moves even without writes
+
+    def _process_metrics(self, metrics: LuminanceMetrics) -> None:
         with self._lock:
             if not self._auto_enabled or self._backend is None:
                 return
@@ -217,7 +223,6 @@ class ControlManager:
                 self._queue.put_nowait(target)
             except queue.Full:
                 pass
-        self._emit_status()
 
     def stop(self) -> None:
         """Stop the worker thread. Brightness is intentionally left as-is

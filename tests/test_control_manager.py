@@ -238,3 +238,25 @@ def test_unsupported_backend_never_enables() -> None:
     manager.wait_idle()
     assert manager.ledger.count() == 0
     manager.stop()
+
+
+def test_status_emitted_every_tick_even_without_writes() -> None:
+    """The TUI strip must track the target on every sample — white→black
+    moves the target even while deadband/rate-limit suppress writes."""
+    clock = FakeClock()
+    seen: list[object] = []
+    manager, backend = make_manager(clock, deadband=0.9, min_write_interval=1000.0)
+    manager._on_status = seen.append  # observe emissions
+    manager.enable()
+    n0 = len(seen)
+    # bright content → target at baseline
+    manager.on_metrics(metrics(mean=255.0, dark=0.0))
+    bright_target = seen[-1].target if seen else None
+    # black content → target drops, though deadband blocks the write
+    manager.on_metrics(metrics(mean=0.0, dark=1.0))
+    dark_target = seen[-1].target if seen else None
+    assert len(seen) > n0  # emitted despite zero writes
+    assert bright_target is not None and dark_target is not None
+    assert dark_target < bright_target
+    assert backend.writes == []  # deadband indeed blocked writes
+    manager.stop()

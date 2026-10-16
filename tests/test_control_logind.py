@@ -60,6 +60,15 @@ def test_normalized_get_brightness(tmp_path: Path) -> None:
     assert backend.get_brightness() == pytest.approx(32768 / 65535)
 
 
+def test_get_prefers_setpoint_over_actual(tmp_path: Path) -> None:
+    """amdgpu reports different scales in the two files (43528 vs 35185 live);
+    reads must use the setpoint domain so drift detection matches our writes."""
+    dev = make_device(tmp_path, "amdgpu_bl1", "raw", 65535, 43528)
+    (dev / "actual_brightness").write_text("35185")
+    backend = LogindBacklightBackend(root=tmp_path, dbus_call=RecordingBus())
+    assert backend.get_brightness() == pytest.approx(43528 / 65535)
+
+
 def test_set_brightness_call_shape(tmp_path: Path) -> None:
     make_device(tmp_path, "amdgpu_bl1", "raw", 65535, 100)
     bus = RecordingBus()
