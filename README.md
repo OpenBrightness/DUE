@@ -84,9 +84,19 @@ This streams deterministic synthetic frames (gradient/checkerboard/sweep) at
 1. Watch the metric cards and 64-bin histogram update once per second.
 2. Press `Space` (or `P`) — telemetry footer flips to `PAUSED`; press again to resume.
 3. Press `R` — "Temporal statistics reset" appears in the status banner;
-   `temporal Δ` shows `—` for one frame.
+   `temporal Δ` shows `—` for one frame and the trend sparklines clear.
 4. Press `S` — returns to the display picker; arrow keys + Enter select a display.
 5. Press `Q` — clean exit; the terminal is fully restored.
+
+Resize-matrix checklist (verify the responsive dashboard at each size):
+
+| Terminal | Expected |
+|---|---|
+| 150×46 | Columns side by side, dashboard vertically centered |
+| 124×40 | Centered (content fits) |
+| 105×30 | Side by side or stacked (boundary), scrollable if content overflows |
+| 80×24 | Columns stacked (`[Internal]` picker dialog unaffected), content top-aligned + scrollable |
+| 70×24 (tiling split) | Stacked, scrollable; histogram auto-groups bins to fit width |
 
 ### 3. Live capture on your own display (niri/sway session)
 

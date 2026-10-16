@@ -123,6 +123,97 @@ def test_select_screen_lists_outputs() -> None:
     run(scenario())
 
 
+def test_select_screen_shows_internal_external_labels() -> None:
+    async def scenario() -> None:
+        app = DueApp(OUTPUTS, mock_factory)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            text = "\n".join(
+                str(label.render()) for label in app.screen.query("DisplayListItem Label")
+            )
+            assert "[Internal] eDP-1" in text
+            assert "[External] HDMI-A-1" in text
+            assert "●" in text
+
+    run(scenario())
+
+
+def test_dashboard_has_redesign_dom() -> None:
+    async def scenario() -> None:
+        app = DueApp(OUTPUTS, mock_factory, initial_output=OUTPUTS[0])
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            screen = app.screen
+            assert isinstance(screen, DashboardScreen)
+            assert screen.query_one("#dashboard-container")
+            assert screen.query_one("#visual-panel")
+            assert screen.query_one("#trend")
+
+    run(scenario())
+
+
+def test_trend_widget_receives_metrics() -> None:
+    async def scenario() -> None:
+        app = DueApp(OUTPUTS, mock_factory, initial_output=OUTPUTS[0])
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            app._teardown()  # stop capture; this test drives the widget directly
+            screen = app.screen
+            assert isinstance(screen, DashboardScreen)
+            screen.clear_trends()
+            for _ in range(5):
+                screen.show_metrics(make_metrics(delta=0.01))
+            await pilot.pause()
+            trend = screen.query_one("#trend")
+            assert len(trend._luma) == 5
+            assert len(trend._delta) == 5
+            await pilot.press("r")
+            await pilot.pause()
+            assert len(trend._luma) == 0
+
+    run(scenario())
+
+
+def test_dashboard_top_aligned_when_content_overflows() -> None:
+    async def scenario() -> None:
+        app = DueApp(OUTPUTS, mock_factory, initial_output=OUTPUTS[0])
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause(0.3)
+            app._teardown()  # deterministic content: drive metrics directly
+            screen = app.screen
+            assert isinstance(screen, DashboardScreen)
+            for _ in range(3):
+                screen.show_metrics(make_metrics(delta=0.01))
+            await pilot.pause()
+            body = screen.query_one("#body")
+            container = screen.query_one("#dashboard-container")
+            assert container.has_class("-narrow")  # 80 < 105 → stacked
+            assert body.has_class("-top-aligned")  # overflow → scrollable top
+            assert body.styles.overflow_y == "auto"
+
+    run(scenario())
+
+
+def test_dashboard_centered_and_side_by_side_when_large() -> None:
+    async def scenario() -> None:
+        app = DueApp(OUTPUTS, mock_factory, initial_output=OUTPUTS[0])
+        async with app.run_test(size=(150, 46)) as pilot:
+            await pilot.pause(0.3)
+            app._teardown()  # deterministic content: drive metrics directly
+            screen = app.screen
+            assert isinstance(screen, DashboardScreen)
+            for _ in range(3):
+                screen.show_metrics(make_metrics(delta=0.01))
+            await pilot.pause()
+            container = screen.query_one("#dashboard-container")
+            body = screen.query_one("#body")
+            assert not container.has_class("-narrow")  # side by side
+            assert not body.has_class("-top-aligned")  # fits → centered
+            assert body.styles.align == ("center", "middle")
+
+    run(scenario())
+
+
 def test_app_capture_and_quit() -> None:
     async def scenario() -> None:
         app = DueApp(OUTPUTS, mock_factory, initial_output=OUTPUTS[0])

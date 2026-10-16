@@ -204,7 +204,8 @@ openbrightness/due/
     └── widgets/
         ├── __init__.py
         ├── metric_card.py      # LuminanceCard, DistributionCard
-        ├── histogram.py        # 64-bin Unicode bar histogram
+        ├── histogram.py        # 64-bin Unicode multi-line spectrum
+        ├── trend.py            # TrendWidget: 30-sample sparklines
         └── status_bar.py       # TelemetryFooter + StatusBanner
 
 protocols/
@@ -221,6 +222,7 @@ tests/
 ├── test_coordinator.py
 ├── test_cli.py             # CLI flags & backend selection
 ├── test_tui.py
+├── test_widgets.py         # widget pure-render tests (histogram/cards/trend)
 ├── test_error_handling.py  # §6 failure matrix
 ├── test_perf.py            # benchmark smoke (CI-safe thresholds)
 └── test_live_capture.py    # integration; auto-skips without a session

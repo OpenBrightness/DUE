@@ -19,6 +19,16 @@ def test_output_info_label_empty_make_model() -> None:
     assert info.label == "HDMI-A-1"
 
 
+def test_output_info_is_internal() -> None:
+    assert OutputInfo("eDP-1", "BOE", "X", 1920, 1200, 60.0).is_internal is True
+    assert OutputInfo("eDP-2", "BOE", "X", 1920, 1200, 60.0).is_internal is True
+    assert OutputInfo("LVDS-1", "BOE", "X", 1366, 768, 60.0).is_internal is True
+    assert OutputInfo("DSI-1", "BOE", "X", 1080, 2160, 60.0).is_internal is True
+    assert OutputInfo("HDMI-A-1", "LG", "Y", 2560, 1440, 144.0).is_internal is False
+    assert OutputInfo("DP-1", "Dell", "Z", 1920, 1080, 60.0).is_internal is False
+    assert OutputInfo("edp-3", "BOE", "X", 1920, 1200, 60.0).is_internal is True
+
+
 def test_frame_rejects_shape_mismatch() -> None:
     with pytest.raises(ValueError, match="shape"):
         DisplayFrame(data=uniform(0, 10, 10), width=20, height=10)

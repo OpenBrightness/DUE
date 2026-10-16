@@ -6,9 +6,10 @@ from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import BindingType
+from textual.containers import Vertical
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
+from textual.widgets import Footer, Label, ListItem, ListView, Static
 
 from openbrightness.due.models import OutputInfo
 
@@ -20,10 +21,12 @@ class DisplayListItem(ListItem):
 
     def compose(self) -> ComposeResult:
         marker = "● " if self.output.is_primary else "  "
+        kind = "[Internal]" if self.output.is_internal else "[External]"
         yield Label(
-            f"{marker}{self.output.connector}  "
-            f"{self.output.make} {self.output.model}  "
-            f"{self.output.width}×{self.output.height} @ {self.output.refresh_rate:.0f} Hz"
+            f"{marker}{kind} {self.output.connector}: "
+            f"{self.output.make} {self.output.model} "
+            f"({self.output.width}×{self.output.height} @ {self.output.refresh_rate:.0f} Hz)",
+            markup=False,
         )
 
 
@@ -33,14 +36,24 @@ class DisplaySelectScreen(Screen[None]):
     BINDINGS: ClassVar[list[BindingType]] = [("q", "quit_app", "Quit")]
 
     DEFAULT_CSS = """
-    #select-title {
+    DisplaySelectScreen {
+        align: center middle;
+    }
+    #select-dialog {
+        width: 68;
+        max-width: 90%;
+        height: auto;
+        max-height: 80%;
+        border: round $primary;
+        background: $surface;
         padding: 1 2;
+    }
+    #select-title {
+        padding: 0 0 1 0;
     }
     #output-list {
         height: auto;
         max-height: 1fr;
-        padding: 0 2;
-        border: round $primary;
     }
     """
 
@@ -50,9 +63,9 @@ class DisplaySelectScreen(Screen[None]):
         self.selected: OutputInfo | None = None
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=False)
-        yield Static("[b]Select a display to analyze[/b]\n", id="select-title")
-        yield ListView(*(DisplayListItem(o) for o in self._outputs), id="output-list")
+        with Vertical(id="select-dialog"):
+            yield Static("[b]Select a display to analyze[/b]\n", id="select-title")
+            yield ListView(*(DisplayListItem(o) for o in self._outputs), id="output-list")
         yield Footer()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:

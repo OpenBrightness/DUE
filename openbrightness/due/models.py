@@ -25,6 +25,11 @@ class OutputInfo:
     is_primary: bool = False
 
     @property
+    def is_internal(self) -> bool:
+        """True for laptop/internal panels (eDP, LVDS, DSI connectors)."""
+        return self.connector.upper().startswith(("EDP", "LVDS", "DSI"))
+
+    @property
     def label(self) -> str:
         name = f"{self.make} {self.model}".strip()
         return f"{self.connector} ({name})" if name else self.connector
