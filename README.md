@@ -32,11 +32,11 @@ pip install -e ".[dev]"
 ## Usage
 
 ```sh
-due                    # interactive display picker + dashboard
-due --display eDP-1    # capture a specific connector
-due --backend mock     # synthetic frames (no session needed)
-due --list-outputs     # enumerate active outputs
-due --auto             # start with content-adaptive dimming enabled
+ob-due                 # interactive display picker + dashboard
+ob-due --display eDP-1 # capture a specific connector
+ob-due --backend mock  # synthetic frames (no session needed)
+ob-due --list-outputs  # enumerate active outputs
+ob-due --auto          # start with content-adaptive dimming enabled
 ```
 
 Keys: `Space`/`P` pause · `A` auto-adjust on/off · `S` switch display ·
@@ -98,7 +98,7 @@ pytest tests/test_live_capture.py -v  # live capture (only inside a Wayland sess
 ### 2. Try the TUI without any display capture (works anywhere)
 
 ```sh
-due --backend mock
+ob-due --backend mock
 ```
 
 This streams deterministic synthetic frames (gradient/checkerboard/sweep) at
@@ -124,9 +124,9 @@ Resize-matrix checklist (verify the responsive dashboard at each size):
 ### 3. Live capture on your own display (niri/sway session)
 
 ```sh
-due --list-outputs          # 1. verify both monitors are discovered
-due --display eDP-1         # 2. capture a specific connector
-due                         # 3. or start with the interactive picker
+ob-due --list-outputs          # 1. verify both monitors are discovered
+ob-due --display eDP-1         # 2. capture a specific connector
+ob-due                         # 3. or start with the interactive picker
 ```
 
 Sanity-check the numbers: pointing the dashboard at a mostly-white window should
@@ -135,8 +135,8 @@ up. `temporal Δ` should be ~0 on a static screen and rise while content moves.
 
 Failure paths worth trying:
 
-- `due --display NONSENSE` → lists the available connectors and exits 1.
-- `due --backend mock --display eDP-1` → mock ignores the connector (documented).
+- `ob-due --display NONSENSE` → lists the available connectors and exits 1.
+- `ob-due --backend mock --display eDP-1` → mock ignores the connector (documented).
 
 ### 4. Live capture tests (inside a Wayland session)
 

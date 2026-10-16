@@ -1,4 +1,4 @@
-"""CLI entry point (`due`): argument parsing, signals, app startup, teardown."""
+"""CLI entry point (`ob-due`): argument parsing, signals, app startup, teardown."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def build_backend_factory(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="due",
+        prog="ob-due",
         description="OpenBrightness Display Understanding Engine — read-only display analysis",
     )
     parser.add_argument(

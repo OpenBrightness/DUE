@@ -24,7 +24,7 @@ dev = [
 ]
 
 [project.scripts]
-due = "openbrightness.due.__main__:main"
+ob-due = "openbrightness.due.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["openbrightness"]

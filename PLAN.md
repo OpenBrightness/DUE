@@ -175,7 +175,7 @@ automation. Any automation for external monitors in any version must remain
 ```
 openbrightness/due/
 ├── __init__.py
-├── __main__.py             # CLI entry (`due`): argparse, signals, teardown
+├── __main__.py             # CLI entry (`ob-due`): argparse, signals, teardown
 ├── models.py               # Frozen dataclasses (OutputInfo, DisplayFrame, LuminanceMetrics)
 ├── discovery.py            # Output enumeration → list[OutputInfo]
 ├── coordinator.py          # Thread-safe pipeline orchestrator (1-slot queue, worker)
@@ -301,7 +301,7 @@ Logging: `logging` to stderr, `WARNING` default, `-v` → `DEBUG`. Nothing else 
 - **Protocol bindings:** `openbrightness/due/_proto/` holds pywayland-generated
   bindings (vendored — no scanner step at install). Regenerate with
   `pywayland-scanner -i /usr/share/wayland/wayland.xml protocols/wlr-screencopy-unstable-v1.xml -o openbrightness/due/_proto`.
-- `pyproject.toml`: hatchling, PEP 621, `openbrightness-due` v0.1.0, MIT, console script `due`.
+- `pyproject.toml`: hatchling, PEP 621, `openbrightness-due` v0.1.0, MIT, console script `ob-due`.
 
 ## 8. Milestones
 
@@ -345,7 +345,7 @@ Benchmark: `python -m openbrightness.due.benchmark` (exits non-zero above target
 
 ### 10.1 V1 *(all verified 2026-10-15)*
 
-1. ✅ `due` runs on Fedora/Niri without crashes or elevated privileges.
+1. ✅ `ob-due` runs on Fedora/Niri without crashes or elevated privileges.
 2. ✅ Discovers all active outputs; picker and `--display` both work.
 3. ✅ Live ~1 FPS capture via `WlrScreencopyBackend` on Niri.
 4. ✅ Metrics match synthetic ground truth (uniform frames ≤ 0.5/255 error; ratios exact on bimodal fixtures; contrast exact on gray ramps).
